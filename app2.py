@@ -2,7 +2,6 @@ import streamlit as st
 import datetime
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 
 # Page Configuration
 st.set_page_config(page_title="Automated Price Action Analyzer", page_icon="📈", layout="wide")
@@ -36,10 +35,10 @@ if ticker:
             st.sidebar.write(f"**Today's Volume:** {volume_latest:,}")
             st.sidebar.write(f"**20-Day Avg Volume:** {volume_avg:,}")
             
-            # --- CALCULATIONS ---
-            df['EMA_50'] = ta.ema(df['Close'], length=50)
-            df['EMA_200'] = ta.ema(df['Close'], length=200)
-            df_weekly['EMA_50'] = ta.ema(df_weekly['Close'], length=50)
+            # --- CLOUD-SAFE NATIVE CALCULATIONS ---
+            df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
+            df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
+            df_weekly['EMA_50'] = df_weekly['Close'].ewm(span=50, adjust=False).mean()
             
             daily_trend = "Range-bound"
             if df['Close'].iloc[-1] > df['EMA_50'].iloc[-1] > df['EMA_200'].iloc[-1]:
@@ -68,7 +67,7 @@ if ticker:
             immediate_res = min([r for r in resistances if r > latest_close], default=latest_close * 1.05)
             major_res = min([r for r in resistances if r > immediate_res], default=immediate_res * 1.05)
 
-            # --- NEW FEATURE: MARKET STRUCTURE SHIFT (MSS) LOGIC ---
+            # --- MARKET STRUCTURE SHIFT (MSS) LOGIC ---
             mss_status = "No active trend shift detected. Market maintaining established structure."
             if len(resistances) >= 2:
                 last_lower_high = resistances[-1]
@@ -110,7 +109,7 @@ if ticker:
             if near_resistance and (is_shooting_star or df['Close'].iloc[-1] < df['Open'].iloc[-1]):
                 sr_confirmation_status = f"⚠️ SUPPLY REJECTION: Price tried to rally but got rejected from immediate resistance at ₹{round(immediate_res, 2)}. Institutional supply blocks are active here."
 
-            # Stage 8 Filter: Risk-to-Reward Validation
+            # Stage 8 Filter: Risk-to-Reward Validation (1:1.5 - 1:2)
             raw_setup_type = "No Setup Available"
             entry, sl, t1, t2, rr_display, action, bias = latest_close, 0.0, 0.0, 0.0, "N/A", "Wait / Sit on Hands", "Neutral"
             confidence = 5
