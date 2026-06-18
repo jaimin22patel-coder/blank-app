@@ -30,7 +30,7 @@ if ticker:
             volume_latest = int(df['Volume'].iloc[-1])
             volume_avg = int(df['Volume'].rolling(window=20).mean().iloc[-1])
             
-            # Current Day Candle Metrics for range calculations
+            # Current Day Candle Metrics
             current_high = round(float(df['High'].iloc[-1]), 2)
             current_low = round(float(df['Low'].iloc[-1]), 2)
             current_open = round(float(df['Open'].iloc[-1]), 2)
@@ -61,7 +61,6 @@ if ticker:
             wave_seq = "Higher Highs / Higher Lows (HH/HL)" if daily_trend == "Uptrend" else "Lower Highs / Lower Lows (LH/LL)" if daily_trend == "Downtrend" else "Equal Highs / Lows (Chop)"
 
             # --- MULTI-TIMEFRAME PIVOT ENGINE ---
-            # 1. Daily Pivots
             df['Daily_Sup'] = df['Low'][(df['Low'] == df['Low'].rolling(window=21, center=True).min())]
             df['Daily_Res'] = df['High'][(df['High'] == df['High'].rolling(window=21, center=True).max())]
             daily_sups = df['Daily_Sup'].dropna().tolist()
@@ -72,7 +71,7 @@ if ticker:
             d_immediate_res = min([r for r in daily_ress if r > latest_close], default=latest_close * 1.05)
             d_major_res = min([r for r in daily_ress if r > d_immediate_res], default=d_immediate_res * 1.05)
 
-            # 2. Weekly Pivots
+            # Weekly Pivots
             df_weekly['Wk_Sup'] = df_weekly['Low'][(df_weekly['Low'] == df_weekly['Low'].rolling(window=11, center=True).min())]
             df_weekly['Wk_Res'] = df_weekly['High'][(df_weekly['High'] == df_weekly['High'].rolling(window=11, center=True).max())]
             weekly_sups = df_weekly['Wk_Sup'].dropna().tolist()
@@ -157,7 +156,7 @@ if ticker:
             
             if is_breaking_high:
                 bo_prob = "High (Genuine)" if volume_ratio > 1.5 else "Low (Potential Trap)"
-                bo_val_range = f"🚀 BREAKOUT ALIVE: Sustained price action above resistance floor. Active breakout entry execution value range: ₹{round(d_immediate_res, 2)} to ₹{round(d_make_high := d_immediate_res * 1.015, 2)}."
+                bo_val_range = f"🚀 BREAKOUT ALIVE: Sustained price action above resistance floor. Active breakout entry execution value range: ₹{round(d_immediate_res, 2)} to ₹{round(d_immediate_res * 1.015, 2)}."
             elif is_breaking_low:
                 bo_prob = "High (Genuine)" if volume_ratio > 1.5 else "Low (Potential Trap)"
                 bo_val_range = f"💥 BREAKDOWN ALIVE: Sustained price action below support floor. Active breakdown short execution value range: ₹{round(d_immediate_sup * 0.985, 2)} to ₹{round(d_immediate_sup, 2)}."
@@ -175,27 +174,39 @@ if ticker:
                 st.write(f"**Wave Sequence:** {wave_seq}")
                 st.info(f"💡 **Structure Shift Log:** {mss_status}")
                 
-                # UPDATED SECTION 2: Multi-Timeframe Supports
                 st.subheader("2. Key Support Levels")
                 st.write(f"📅 **Daily Immediate Support:** ₹{round(d_immediate_sup, 2)}")
                 st.write(f"📅 **Daily Major Floor:** ₹{round(d_major_sup, 2)}")
                 st.write(f"🗓️ **Weekly Macro Support:** ₹{round(w_immediate_sup, 2)}")
                 
-                # UPDATED SECTION 3: Multi-Timeframe Resistances
                 st.subheader("3. Key Resistance Levels")
-                st.write(f"**Daily Immediate Resistance:** ₹{round(d_immediate_res, 2)}")
+                st.write(f"📅 **Daily Immediate Resistance:** ₹{round(d_immediate_res, 2)}")
                 st.write(f"📅 **Daily Major Ceiling:** ₹{round(d_major_res, 2)}")
                 st.write(f"🗓️ **Weekly Macro Resistance:** ₹{round(w_immediate_res, 2)}")
                 
-                # UPDATED SECTION 4: High Precision Interpretation
+                # --- UPDATED SECTION 4: INTERPRETATION FOR BOTH IMMEDIATE & MAJOR ZONES ---
                 st.subheader("4. Price Action Interpretation")
-                demand_range_low = round(d_immediate_sup, 2)
-                demand_range_high = round(d_immediate_sup * 1.015, 2)
-                supply_range_low = round(d_immediate_res * 0.985, 2)
-                supply_range_high = round(d_immediate_res, 2)
                 
-                st.write(f"🟢 **Precision Order Block / Demand Zone:** ₹{demand_range_low} - ₹{demand_range_high}")
-                st.write(f"🔴 **Precision Liquidity Pool / Supply Zone:** ₹{supply_range_low} - ₹{supply_range_high}")
+                # Calculations for Immediate Ranges (1.5% bands)
+                imm_demand_low = round(d_immediate_sup, 2)
+                imm_demand_high = round(d_immediate_sup * 1.015, 2)
+                imm_supply_low = round(d_immediate_res * 0.985, 2)
+                imm_supply_high = round(d_immediate_res, 2)
+                
+                # Calculations for Major Ranges (1.5% bands)
+                maj_demand_low = round(d_major_sup, 2)
+                maj_demand_high = round(d_major_sup * 1.015, 2)
+                maj_supply_low = round(d_major_res * 0.985, 2)
+                maj_supply_high = round(d_major_res, 2)
+                
+                st.markdown("**🟢 Demand Zones (Support Clusters):**")
+                st.write(f"* **Immediate Demand Zone:** ₹{imm_demand_low} - ₹{imm_demand_high}")
+                st.write(f"* **Major Institutional Floor:** ₹{maj_demand_low} - ₹{maj_demand_high}")
+                
+                st.markdown("**🔴 Supply Zones (Resistance Clusters):**")
+                st.write(f"* **Immediate Supply Zone:** ₹{imm_supply_low} - ₹{imm_supply_high}")
+                st.write(f"* **Major Institutional Ceiling:** ₹{maj_supply_low} - ₹{maj_supply_high}")
+                
                 st.write(f"📈 **Volume Pulse:** Trading at `{round(volume_ratio, 2)}x` average institutional volume.")
 
                 st.subheader("5. Candlestick Analysis")
@@ -207,15 +218,14 @@ if ticker:
                 st.write(f"**Observed Formations:** {', '.join(candles_found)}")
 
             with col2:
-                # UPDATED SECTION 6: Breakout/Breakdown Target Ranges
                 st.subheader("6. Breakout / Breakdown Assessment")
                 st.write(f"**Probability Score:** `{bo_prob}`")
                 st.write(f"**Volume Multiplier:** {round(volume_ratio, 2)}x")
                 st.warning(bo_val_range)
                 
                 st.subheader("7. Retest Analysis")
-                st.write(f"**Status:** {'Retest Completed' if latest_close <= d_immediate_sup * 1.015 and daily_trend == 'Uptrend' else 'Awaiting Retest'}")
-                st.write(f"**Optimal Entry Zone:** ₹{demand_range_low} - ₹{demand_range_high}")
+                st.write(f"**Status:** {'Retest Completed' if latest_close <= imm_demand_high and daily_trend == 'Uptrend' else 'Awaiting Retest'}")
+                st.write(f"**Optimal Entry Zone:** ₹{imm_demand_low} - ₹{imm_demand_high}")
                 st.write(f"**Invalidity Level:** Close below ₹{round(d_major_sup, 2)}")
                 
                 st.subheader("8. Algorithmic Trade Setup (Risk Filtered ≥ 1:1.5)")
@@ -229,7 +239,6 @@ if ticker:
                     st.write(f"🚀 **Target 2:** ₹{t2}")
                     st.metric(label="Calculated Risk-to-Reward Ratio", value=rr_display)
                 
-                # UPDATED SECTION 9: Structural S/R Rejection/Holding Values
                 st.subheader("9. Structural Support & Resistance Confirmation")
                 st.info(sr_confirmation_status)
                 
