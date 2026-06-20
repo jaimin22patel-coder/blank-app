@@ -67,23 +67,19 @@ if col_rem.button("❌ Remove Current", use_container_width=True):
         st.session_state["active_ticker"] = st.session_state["watchlist"][0] if st.session_state["watchlist"] else ""
         st.rerun()
 
-# --- HELPER FUNCTION: FRACTAL PIVOT DETECTION ENGINE ---
+# --- HELPER FUNCTION: FIXED STRUCTURAL PROXIMITY ENGINE ---
 def extract_structural_levels(prices_high, prices_low, current_cmp, zone_pct=0.015):
-    """
-    Isolates fractal swing highs/lows (peaks and valleys) where a level is flanked 
-    by lower/higher wicks, preventing sequential daily candle bleeding.
-    """
     swing_highs = []
     swing_lows = []
     
-    # 1. Isolate structural fractal peaks and valleys (3-candle window matrix)
+    # 1. Isolate structural fractal peaks and valleys (3-candle window)
     for i in range(1, len(prices_high) - 1):
         if prices_high[i] > prices_high[i-1] and prices_high[i] > prices_high[i+1]:
             swing_highs.append(prices_high[i])
         if prices_low[i] < prices_low[i-1] and prices_low[i] < prices_low[i+1]:
             swing_lows.append(prices_low[i])
             
-    # 2. Cluster pivots using your custom touch rules
+    # 2. Cluster pivots into horizontal price zones
     def cluster_points(points):
         clusters = {}
         for p in points:
@@ -100,17 +96,23 @@ def extract_structural_levels(prices_high, prices_low, current_cmp, zone_pct=0.0
     sup_clusters = cluster_points(swing_lows)
     res_clusters = cluster_points(swing_highs)
     
-    # 3. Sort strictly by user's rules: Immediate (2-3 touches) vs Major (>=4 touches)
-    imm_sups = [k for k, v in sup_clusters.items() if v in [2, 3] and k < current_cmp]
-    maj_sups = [k for k, v in sup_clusters.items() if v >= 4 and k < current_cmp]
-    imm_ress = [k for k, v in res_clusters.items() if v in [2, 3] and k > current_cmp]
-    maj_ress = [k for k, v in res_clusters.items() if v >= 4 and k > current_cmp]
+    # 3. FIXED PROXIMITY SORTING (Closest level to price always becomes Immediate)
+    all_sups = sorted([k for k in sup_clusters.keys() if k < current_cmp], reverse=True)
+    all_ress = sorted([k for k in res_clusters.keys() if k > current_cmp])
+    
+    # Support Mapping Logic
+    d_imm_sup = all_sups[0] if len(all_sups) > 0 else current_cmp * 0.98
+    d_maj_sup = all_sups[1] if len(all_sups) > 1 else d_imm_sup * 0.95
+    
+    # Resistance Mapping Logic
+    d_imm_res = all_ress[0] if len(all_ress) > 0 else current_cmp * 1.02
+    d_maj_res = all_ress[1] if len(all_ress) > 1 else d_imm_res * 1.05
     
     return {
-        "immediate_support": max(imm_sups, default=current_cmp * 0.96),
-        "major_support": max(maj_sups, default=current_cmp * 0.93),
-        "immediate_resistance": min(imm_ress, default=current_cmp * 1.04),
-        "major_resistance": min(maj_ress, default=current_cmp * 1.07),
+        "immediate_support": d_imm_sup,
+        "major_support": d_maj_sup,
+        "immediate_resistance": d_imm_res,
+        "major_resistance": d_maj_res,
         "sup_counts": sup_clusters,
         "res_counts": res_clusters
     }
@@ -144,7 +146,6 @@ if ticker:
             daily_levels = extract_structural_levels(df['High'].values, df['Low'].values, latest_close)
             weekly_levels = extract_structural_levels(df_weekly['High'].values, df_weekly['Low'].values, latest_close)
             
-            # Master Level Assignments based on execution maps
             d_immediate_sup = daily_levels["immediate_support"]
             d_major_sup = daily_levels["major_support"]
             d_immediate_res = daily_levels["immediate_resistance"]
@@ -182,12 +183,11 @@ if ticker:
             is_hammer = total_range > 0 and (lower_wick / total_range > 0.6)
             is_shooting_star = total_range > 0 and (upper_wick / total_range > 0.6)
 
-            # --- CORRECTED RETEST BREAKOUT ENGINE ---
+            # --- BREAKOUT ENGINE ---
             retest_status = "Awaiting Initial Structural Breach"
             bo_prob = "No Breakout"
             bo_val_range = "⚖️ CONSOLIDATION: Price trading inside structural boundaries."
             
-            # Look back at historical candles relative to static structural boundaries
             recent_closes = df['Close'].iloc[-6:-1].tolist()
             recent_lows = df['Low'].iloc[-6:-1].tolist()
             recent_highs = df['High'].iloc[-6:-1].tolist()
@@ -197,7 +197,6 @@ if ticker:
             
             volume_ratio = volume_latest / volume_avg
             
-            # Run the state tracking logic safely against static structural anchors
             if latest_close > d_immediate_res:
                 bo_prob = "High (Raw Breakout)" if volume_ratio > 1.5 else "Low (Potential Trap)"
                 retest_status = "🏃 Awaiting Retest (Raw Breakout printing)"
