@@ -77,7 +77,7 @@ def extract_structural_levels(prices_high, prices_low, current_cmp, zone_pct=0.0
     swing_lows = []
     
     # 1. Isolate structural fractal peaks and valleys (3-candle window matrix)
-    for i in range(1, len(prices_high) - i - 1):
+    for i in range(1, len(prices_high) - 1):
         if prices_high[i] > prices_high[i-1] and prices_high[i] > prices_high[i+1]:
             swing_highs.append(prices_high[i])
         if prices_low[i] < prices_low[i-1] and prices_low[i] < prices_low[i+1]:
