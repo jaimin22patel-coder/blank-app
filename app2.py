@@ -33,14 +33,15 @@ else:
 if "active_ticker" not in st.session_state:
     st.session_state["active_ticker"] = "SUNPHARMA"
 
+# We use an empty default string here to let the state handle the values safely
 raw_ticker = st.sidebar.text_input(
     "Enter Stock Symbol Manually:", 
-    value=st.session_state["active_ticker"],
+    value="" if st.session_state["active_ticker"] == "" else st.session_state["active_ticker"],
     key="manual_ticker_input"
 )
 
-# Sync input text alterations back to active state tracker
-if raw_ticker.upper().strip() != st.session_state["active_ticker"]:
+# FIXED: Only overwrite the active ticker if the user actually typed a valid symbol!
+if raw_ticker.strip() != "" and raw_ticker.upper().strip() != st.session_state["active_ticker"]:
     st.session_state["active_ticker"] = raw_ticker.upper().strip()
 
 ticker = st.session_state["active_ticker"].replace(".NS", "")
