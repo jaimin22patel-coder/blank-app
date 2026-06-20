@@ -2,6 +2,7 @@ import streamlit as st
 import datetime
 import yfinance as yf
 import pandas as pd
+import numpy as np
 
 # Page Configuration
 st.set_page_config(page_title="Automated Price Action Analyzer", page_icon="📈", layout="wide")
@@ -9,17 +10,60 @@ st.set_page_config(page_title="Automated Price Action Analyzer", page_icon="📈
 st.title("🤖 Advanced Institutional Price Action Analyzer")
 st.markdown("---")
 
+# --- INITIALIZE WATCHLIST STORAGE ---
+if "watchlist" not in st.session_state:
+    st.session_state["watchlist"] = ["SUNPHARMA", "RELIANCE", "KOTAKBANK", "ADANIPORTS"]
+
 # Sidebar Configuration
 st.sidebar.header("NSE Stock Selection")
-raw_ticker = st.sidebar.text_input("NSE Stock Symbol (e.g., SBIN, RELIANCE, SUNPHARMA)", value="SUNPHARMA")
-ticker = raw_ticker.upper().strip().replace(".NS", "")
 
+# 1. Watchlist Buttons Section
+st.sidebar.subheader("⭐ My Watchlist")
+if st.session_state["watchlist"]:
+    # Create rows of clickable badge buttons for easy mobile tapping
+    cols = st.sidebar.columns(2)
+    for index, ticker_item in enumerate(st.session_state["watchlist"]):
+        col_side = cols[index % 2]
+        if col_side.button(f"🔍 {ticker_item}", key=f"wl_{ticker_item}", use_container_width=True):
+            st.session_state["active_ticker"] = ticker_item
+else:
+    st.sidebar.caption("Watchlist is empty. Add stocks below!")
+
+# 2. Main Manual Input / Active Ticker Handler
+if "active_ticker" not in st.session_state:
+    st.session_state["active_ticker"] = "SUNPHARMA"
+
+raw_ticker = st.sidebar.text_input(
+    "Enter Stock Symbol Manually:", 
+    value=st.session_state["active_ticker"],
+    key="manual_ticker_input"
+)
+
+# Sync input text alterations back to active state tracker
+if raw_ticker.upper().strip() != st.session_state["active_ticker"]:
+    st.session_state["active_ticker"] = raw_ticker.upper().strip()
+
+ticker = st.session_state["active_ticker"].replace(".NS", "")
+
+# 3. Add / Remove Control Panel
+col_add, col_rem = st.sidebar.columns(2)
+if col_add.button("➕ Add to List", use_container_width=True):
+    if ticker not in st.session_state["watchlist"] and ticker != "":
+        st.session_state["watchlist"].append(ticker)
+        st.rerun()
+
+if col_rem.button("❌ Remove Current", use_container_width=True):
+    if ticker in st.session_state["watchlist"]:
+        st.session_state["watchlist"].remove(ticker)
+        st.rerun()
+
+# --- ANALYTICS ENGINE RUNS BELOW ---
 if ticker:
     try:
         yf_symbol = f"{ticker}.NS"
         stock = yf.Ticker(yf_symbol)
         
-        # Fetch Daily and Weekly Data structures
+        # Fetch Data structures
         df = stock.history(period="1y", interval="1d")
         df_weekly = stock.history(period="2y", interval="1wk")
         
@@ -35,13 +79,14 @@ if ticker:
             current_low = round(float(df['Low'].iloc[-1]), 2)
             current_open = round(float(df['Open'].iloc[-1]), 2)
             
-            # Sidebar Metrics Render
+            # Live Feed Sub-sidebar Renders
+            st.sidebar.markdown("---")
             st.sidebar.subheader(f"🇮🇳 Live Feed: {ticker}")
             st.sidebar.metric(label="Current CMP", value=f"₹{latest_close:,}", delta=f"{pct_change}%")
             st.sidebar.write(f"**Today's Volume:** {volume_latest:,}")
             st.sidebar.write(f"**20-Day Avg Volume:** {volume_avg:,}")
             
-            # --- TREND LOGIC VIA NATIVE EMA ---
+            # --- TREND LOGIC ---
             df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
             df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
             df_weekly['EMA_50'] = df_weekly['Close'].ewm(span=50, adjust=False).mean()
@@ -60,109 +105,139 @@ if ticker:
                 
             wave_seq = "Higher Highs / Higher Lows (HH/HL)" if daily_trend == "Uptrend" else "Lower Highs / Lower Lows (LH/LL)" if daily_trend == "Downtrend" else "Equal Highs / Lows (Chop)"
 
-            # --- MULTI-TIMEFRAME PIVOT ENGINE ---
-            df['Daily_Sup'] = df['Low'][(df['Low'] == df['Low'].rolling(window=21, center=True).min())]
-            df['Daily_Res'] = df['High'][(df['High'] == df['High'].rolling(window=21, center=True).max())]
-            daily_sups = df['Daily_Sup'].dropna().tolist()
-            daily_ress = df['Daily_Res'].dropna().tolist()
+            # --- USER'S TOUCH-COUNT LEVEL ENGINE ---
+            highs = df['High'].values
+            lows = df['Low'].values
+            zone_multiplier = 0.015
             
-            d_immediate_sup = max([s for s in daily_sups if s < latest_close], default=latest_close * 0.95)
-            d_major_sup = max([s for s in daily_sups if s < d_immediate_sup], default=d_immediate_sup * 0.95)
-            d_immediate_res = min([r for r in daily_ress if r > latest_close], default=latest_close * 1.05)
-            d_major_res = min([r for r in daily_ress if r > d_immediate_res], default=d_immediate_res * 1.05)
-
-            # Weekly Pivots
-            df_weekly['Wk_Sup'] = df_weekly['Low'][(df_weekly['Low'] == df_weekly['Low'].rolling(window=11, center=True).min())]
-            df_weekly['Wk_Res'] = df_weekly['High'][(df_weekly['High'] == df_weekly['High'].rolling(window=11, center=True).max())]
-            weekly_sups = df_weekly['Wk_Sup'].dropna().tolist()
-            weekly_ress = df_weekly['Wk_Res'].dropna().tolist()
+            support_counts = {}
+            resistance_counts = {}
             
-            w_immediate_sup = max([s for s in weekly_sups if s < latest_close], default=latest_close * 0.93)
-            w_immediate_res = min([r for r in weekly_ress if r > latest_close], default=latest_close * 1.07)
+            for l in lows[:-1]:
+                matched = False
+                for base in support_counts:
+                    if abs(l - base) / base <= zone_multiplier:
+                        support_counts[base] += 1
+                        matched = True
+                        break
+                if not matched:
+                    support_counts[l] = 1
+                    
+            for h in highs[:-1]:
+                matched = False
+                for base in resistance_counts:
+                    if abs(h - base) / base <= zone_multiplier:
+                        resistance_counts[base] += 1
+                        matched = True
+                        break
+                if not matched:
+                    resistance_counts[h] = 1
 
-            # --- MARKET STRUCTURE SHIFT (MSS) ---
-            mss_status = "No active trend shift detected. Market maintaining established structure."
-            if len(daily_ress) >= 2:
-                last_lower_high = daily_ress[-1]
-                if daily_trend == "Range-bound" and weekly_trend == "Downtrend" and latest_close > last_lower_high:
-                    mss_status = f"🚨 MARKET STRUCTURE SHIFT (MSS): Price has broken above the last structural lower high (₹{round(last_lower_high, 2)}). Reversal change of character is underway!"
-                elif daily_trend == "Uptrend" and latest_close > d_immediate_res:
-                    mss_status = "🔄 CONTINUATION: Bullish break of structure (BOS) confirmed. Institutions are adding positions."
+            imm_sups = [k for k, v in support_counts.items() if v in [2, 3] and k < latest_close]
+            maj_sups = [k for k, v in support_counts.items() if v >= 4 and k < latest_close]
+            imm_ress = [k for k, v in resistance_counts.items() if v in [2, 3] and k > latest_close]
+            maj_ress = [k for k, v in resistance_counts.items() if v >= 4 and k > latest_close]
 
-            # Candlestick Calculations
+            d_immediate_sup = max(imm_sups, default=latest_close * 0.96)
+            d_major_sup = max(maj_sups, default=d_immediate_sup * 0.95)
+            d_immediate_res = min(imm_ress, default=latest_close * 1.04)
+            d_major_res = min(maj_ress, default=d_immediate_res * 1.05)
+
+            imm_sup_touches = support_counts.get(d_immediate_sup, 2)
+            maj_sup_touches = max([v for k, v in support_counts.items() if k < d_immediate_sup], default=4)
+            imm_res_touches = resistance_counts.get(d_immediate_res, 2)
+            maj_res_touches = max([v for k, v in resistance_counts.items() if k > d_immediate_res], default=4)
+
+            w_immediate_sup = latest_close * 0.93
+            w_immediate_res = latest_close * 1.07
+
             body = abs(latest_close - current_open)
             total_range = current_high - current_low
             lower_wick = min(current_open, latest_close) - current_low
             upper_wick = current_high - max(current_open, latest_close)
-            
             is_hammer = total_range > 0 and (lower_wick / total_range > 0.6)
             is_shooting_star = total_range > 0 and (upper_wick / total_range > 0.6)
 
-            # --- PRECISION SECTION 9: REJECTION & HOLDING RANGES ---
-            sr_confirmation_status = "No structural testing event found at immediate key levels."
+            # --- DYNAMIC RETEST TRACKING ENGINE ---
+            retest_status = "Awaiting Initial Structural Breach"
+            bo_prob = "No Breakout"
+            bo_val_range = "⚖️ CONSOLIDATION: Price trading inside structural boundaries."
+            
+            recent_closes = df['Close'].iloc[-6:-1].tolist()
+            recent_lows = df['Low'].iloc[-6:-1].tolist()
+            recent_highs = df['High'].iloc[-6:-1].tolist()
+            
+            had_bullish_breach = any(c > d_immediate_res for c in recent_closes)
+            had_bearish_breach = any(c < d_immediate_sup for c in recent_closes)
+            
+            volume_ratio = volume_latest / volume_avg
+            
+            if had_bullish_breach:
+                returned_to_zone = any(l <= (d_immediate_res * 1.015) and l >= (d_immediate_res * 0.985) for l in recent_lows)
+                if returned_to_zone:
+                    if latest_close > current_open or is_hammer:
+                        retest_status = "✅ RETEST CONFIRMED: Old resistance floor successfully transformed into active support."
+                        bo_prob = "High (Retest Verified)" if volume_ratio >= 1.2 else "Medium"
+                        bo_val_range = f"🚀 RETEST BUY ENTRY LIVE: Zone: ₹{round(d_immediate_res, 2)} - ₹{round(d_immediate_res * 1.015, 2)}."
+                    else:
+                        retest_status = "⏳ RETEST IN PROGRESS: Pullback underway. Awaiting daily confirmation."
+                        bo_prob = "Evaluating"
+                        bo_val_range = "⚠️ HOLD ENTRIES: Price is directly on the line."
+                else:
+                    retest_status = "🏃 CHASING: Price broke out but has not pulled back to retest."
+                    bo_prob = "Low (Overextended)"
+                    bo_val_range = f"❌ DO NOT CHASE: Risk-to-Reward invalid. Wait for pullback to ₹{round(d_immediate_res, 2)}."
+
+            elif had_bearish_breach:
+                returned_to_zone = any(h >= (d_immediate_sup * 0.985) and h <= (d_immediate_sup * 1.015) for h in recent_highs)
+                if returned_to_zone:
+                    if latest_close < current_open or is_shooting_star:
+                        retest_status = "💥 BREAKDOWN RETEST CONFIRMED: Old support completely turned into active ceiling."
+                        bo_prob = "High (Retest Verified)" if volume_ratio >= 1.2 else "Medium"
+                        bo_val_range = f"📉 RETEST SHORT ENTRY LIVE: Zone: ₹{round(d_immediate_sup * 0.985, 2)} - ₹{round(d_immediate_sup, 2)}."
+                    else:
+                        retest_status = "⏳ SHORT RETEST IN PROGRESS: Price has bounced to old support floor."
+                        bo_prob = "Evaluating"
+                        bo_val_range = "⚠️ HOLD SHORTS: Price is resting on the line."
+                else:
+                    retest_status = "🏃 OVEREXTENDED DROP: Price broke down but has not pulled back to retest."
+                    bo_prob = "Low"
+                    bo_val_range = f"❌ DO NOT SHORT HERE: Wait for a relief bounce back to ₹{round(d_immediate_sup, 2)}."
+            else:
+                if latest_close > d_immediate_res:
+                    bo_prob = "High (Raw Breakout)" if volume_ratio > 1.5 else "Low (Potential Trap)"
+                    retest_status = "🏃 Awaiting Retest (Raw Breakout printing)"
+                    bo_val_range = f"🚀 INITIAL BREACH: Range: ₹{round(d_immediate_res, 2)} to ₹{round(d_immediate_res * 1.015, 2)}."
+                elif latest_close < d_immediate_sup:
+                    bo_prob = "High (Raw Breakdown)" if volume_ratio > 1.5 else "Low (Potential Trap)"
+                    retest_status = "🏃 Awaiting Retest (Raw Breakdown printing)"
+                    bo_val_range = f"💥 INITIAL BREACH: Range: ₹{round(d_immediate_sup * 0.985, 2)} to ₹{round(d_immediate_sup, 2)}."
+
+            # --- STRUCTURAL CONFIRMATION ---
+            sr_confirmation_status = "No testing event at immediate key levels right now."
             near_support_zone = latest_close <= (d_immediate_sup * 1.02)
             near_resistance_zone = latest_close >= (d_immediate_res * 0.98)
             
             if near_support_zone and (is_hammer or latest_close > current_open):
-                hold_min = current_low
-                hold_max = max(current_open, latest_close)
-                sr_confirmation_status = f"✅ DEMAND HOLD CONFIRMED: Price is stabilizing and holding immediate support level of ₹{round(d_immediate_sup, 2)}. Active buying range identified between ₹{round(hold_min, 2)} - ₹{round(hold_max, 2)}."
+                sr_confirmation_status = f"✅ DEMAND HOLD CONFIRMED: Held {imm_sup_touches} times over the last 250 trading days."
             elif near_resistance_zone and (is_shooting_star or latest_close < current_open):
-                reject_min = min(current_open, latest_close)
-                reject_max = current_high
-                sr_confirmation_status = f"⚠️ SUPPLY REJECTION CONFIRMED: Price faced institutional rejection near resistance level of ₹{round(d_immediate_res, 2)}. Active supply/selling overhead range identified between ₹{round(reject_min, 2)} - ₹{round(reject_max, 2)}."
+                sr_confirmation_status = f"⚠️ SUPPLY REJECTION CONFIRMED: Rejected price expansion {imm_res_touches} times historically."
 
-            # --- PRECISION SECTION 8: RISK FILTER ---
+            # --- RISK FILTER SETUP ---
             raw_setup_type = "No Setup Available"
             entry, sl, t1, t2, rr_display, action, bias = latest_close, 0.0, 0.0, 0.0, "N/A", "Wait / Sit on Hands", "Neutral"
             confidence = 5
 
-            if daily_trend == "Uptrend":
+            if daily_trend == "Uptrend" and "CONFIRMED" in retest_status:
                 test_entry = latest_close
                 test_sl = round(d_immediate_sup * 0.99, 2)
                 test_t1 = round(d_immediate_res, 2)
                 risk = abs(test_entry - test_sl)
                 reward = abs(test_t1 - test_entry)
-                ratio = reward / risk if risk > 0 else 0
-                
-                if ratio >= 1.5:
-                    raw_setup_type = "Bullish Long Setup"
-                    entry, sl, t1, t2 = test_entry, test_sl, test_t1, round(d_major_res, 2)
-                    rr_display = f"1 : {round(ratio, 2)}"
-                    bias = "Bullish"
-                    action = "Buy"
-                    confidence = 8 if daily_trend == weekly_trend else 6
-                    
-            elif daily_trend == "Downtrend":
-                test_entry = latest_close
-                test_sl = round(d_immediate_res * 1.01, 2)
-                test_t1 = round(d_immediate_sup, 2)
-                risk = abs(test_sl - test_entry)
-                reward = abs(test_entry - test_t1)
-                ratio = reward / risk if risk > 0 else 0
-                
-                if ratio >= 1.5:
-                    raw_setup_type = "Bearish Short Setup"
-                    entry, sl, t1, t2 = test_entry, test_sl, test_t1, round(d_major_sup, 2)
-                    rr_display = f"1 : {round(ratio, 2)}"
-                    bias = "Bearish"
-                    action = "Sell / Short"
-                    confidence = 8 if daily_trend == weekly_trend else 6
-
-            # --- PRECISION SECTION 6: BREAKOUT VALUES ---
-            volume_ratio = volume_latest / volume_avg
-            is_breaking_high = latest_close > (d_immediate_res * 0.99)
-            is_breaking_low = latest_close < (d_immediate_sup * 1.01)
-            
-            if is_breaking_high:
-                bo_prob = "High (Genuine)" if volume_ratio > 1.5 else "Low (Potential Trap)"
-                bo_val_range = f"🚀 BREAKOUT ALIVE: Sustained price action above resistance floor. Active breakout entry execution value range: ₹{round(d_immediate_res, 2)} to ₹{round(d_immediate_res * 1.015, 2)}."
-            elif is_breaking_low:
-                bo_prob = "High (Genuine)" if volume_ratio > 1.5 else "Low (Potential Trap)"
-                bo_val_range = f"💥 BREAKDOWN ALIVE: Sustained price action below support floor. Active breakdown short execution value range: ₹{round(d_immediate_sup * 0.985, 2)} to ₹{round(d_immediate_sup, 2)}."
-            else:
-                bo_prob = "No Breakout"
-                bo_val_range = f"⚖️ CONSOLIDATION: Price trading inside structural boundaries. Breakout triggers only if daily candle closes above ₹{round(d_immediate_res, 2)} or below ₹{round(d_immediate_sup, 2)}."
+                raw_setup_type = "Retest Verified Long Setup"
+                entry, sl, t1, t2 = test_entry, test_sl, test_t1, round(d_major_res, 2)
+                rr_display = "Dynamic Structure"
+                bias, action, confidence = "Bullish", "Buy", 9
 
             # --- UI RENDERING ---
             col1, col2 = st.columns(2)
@@ -172,79 +247,45 @@ if ticker:
                 st.write(f"**Daily Chart Bias:** `{daily_trend}`")
                 st.write(f"**Weekly Chart Bias:** `{weekly_trend}`")
                 st.write(f"**Wave Sequence:** {wave_seq}")
-                st.info(f"💡 **Structure Shift Log:** {mss_status}")
                 
                 st.subheader("2. Key Support Levels")
-                st.write(f"📅 **Daily Immediate Support:** ₹{round(d_immediate_sup, 2)}")
-                st.write(f"📅 **Daily Major Floor:** ₹{round(d_major_sup, 2)}")
-                st.write(f"🗓️ **Weekly Macro Support:** ₹{round(w_immediate_sup, 2)}")
+                st.write(f"📅 **Immediate Support:** ₹{round(d_immediate_sup, 2)} *(Tested {imm_sup_touches} times)*")
+                st.write(f"📅 **Major Floor:** ₹{round(d_major_sup, 2)} *(Tested {maj_sup_touches} times)*")
                 
                 st.subheader("3. Key Resistance Levels")
-                st.write(f"📅 **Daily Immediate Resistance:** ₹{round(d_immediate_res, 2)}")
-                st.write(f"📅 **Daily Major Ceiling:** ₹{round(d_major_res, 2)}")
-                st.write(f"🗓️ **Weekly Macro Resistance:** ₹{round(w_immediate_res, 2)}")
+                st.write(f"📅 **Immediate Resistance:** ₹{round(d_immediate_res, 2)} *(Tested {imm_res_touches} times)*")
+                st.write(f"📅 **Major Ceiling:** ₹{round(d_major_res, 2)} *(Tested {maj_res_touches} times)*")
                 
-                # --- UPDATED SECTION 4: INTERPRETATION FOR BOTH IMMEDIATE & MAJOR ZONES ---
                 st.subheader("4. Price Action Interpretation")
-                
-                # Calculations for Immediate Ranges (1.5% bands)
-                imm_demand_low = round(d_immediate_sup, 2)
-                imm_demand_high = round(d_immediate_sup * 1.015, 2)
-                imm_supply_low = round(d_immediate_res * 0.985, 2)
-                imm_supply_high = round(d_immediate_res, 2)
-                
-                # Calculations for Major Ranges (1.5% bands)
-                maj_demand_low = round(d_major_sup, 2)
-                maj_demand_high = round(d_major_sup * 1.015, 2)
-                maj_supply_low = round(d_major_res * 0.985, 2)
-                maj_supply_high = round(d_major_res, 2)
-                
-                st.markdown("**🟢 Demand Zones (Support Clusters):**")
-                st.write(f"* **Immediate Demand Zone:** ₹{imm_demand_low} - ₹{imm_demand_high}")
-                st.write(f"* **Major Institutional Floor:** ₹{maj_demand_low} - ₹{maj_demand_high}")
-                
-                st.markdown("**🔴 Supply Zones (Resistance Clusters):**")
-                st.write(f"* **Immediate Supply Zone:** ₹{imm_supply_low} - ₹{imm_supply_high}")
-                st.write(f"* **Major Institutional Ceiling:** ₹{maj_supply_low} - ₹{maj_supply_high}")
-                
-                st.write(f"📈 **Volume Pulse:** Trading at `{round(volume_ratio, 2)}x` average institutional volume.")
+                st.markdown("**🟢 Demand Zones:**")
+                st.write(f"* **Immediate (Touches: {imm_sup_touches}):** ₹{round(d_immediate_sup, 2)} - ₹{round(d_immediate_sup * 1.015, 2)}")
+                st.markdown("**🔴 Supply Zones:**")
+                st.write(f"* **Immediate (Touches: {imm_res_touches}):** ₹{round(d_immediate_res * 0.985, 2)} - ₹{round(d_immediate_res, 2)}")
 
                 st.subheader("5. Candlestick Analysis")
-                candles_found = []
-                if is_hammer: candles_found.append("Bullish Rejection (Hammer)")
-                if is_shooting_star: candles_found.append("Bearish Rejection (Shooting Star)")
-                if body / (total_range if total_range > 0 else 1) > 0.8: candles_found.append("Marubozu Momentum")
-                if not candles_found: candles_found.append("Standard Consolidation Candle")
-                st.write(f"**Observed Formations:** {', '.join(candles_found)}")
+                st.write(f"**Observed Formations:** {'Hammer Rejection' if is_hammer else 'Shooting Star' if is_shooting_star else 'Consolidation Candle'}")
 
             with col2:
                 st.subheader("6. Breakout / Breakdown Assessment")
-                st.write(f"**Probability Score:** `{bo_prob}`")
+                st.write(f"**Retest Verification Score:** `{bo_prob}`")
                 st.write(f"**Volume Multiplier:** {round(volume_ratio, 2)}x")
                 st.warning(bo_val_range)
                 
                 st.subheader("7. Retest Analysis")
-                st.write(f"**Status:** {'Retest Completed' if latest_close <= imm_demand_high and daily_trend == 'Uptrend' else 'Awaiting Retest'}")
-                st.write(f"**Optimal Entry Zone:** ₹{imm_demand_low} - ₹{imm_demand_high}")
-                st.write(f"**Invalidity Level:** Close below ₹{round(d_major_sup, 2)}")
+                st.info(f"🔄 **Retest Tracking Engine:** {retest_status}")
                 
-                st.subheader("8. Algorithmic Trade Setup (Risk Filtered ≥ 1:1.5)")
+                st.subheader("8. Algorithmic Trade Setup (Risk Filtered)")
                 if raw_setup_type == "No Setup Available":
-                    st.warning("⚠️ No Trade Setup Generated: The structural distance to target does not meet the minimum required Risk-to-Reward ratio of 1:1.5.")
+                    st.warning("⚠️ No Trade Setup Generated: Waiting for a verified high-volume retest bounce to confirm structural invalidation levels.")
                 else:
                     st.info(f"**Structure Found:** {raw_setup_type}")
-                    st.write(f"👉 **Entry Price:** ₹{entry}")
-                    st.write(f"🛑 **Stop Loss:** ₹{sl}")
-                    st.write(f"🎯 **Target 1:** ₹{t1}")
-                    st.write(f"🚀 **Target 2:** ₹{t2}")
-                    st.metric(label="Calculated Risk-to-Reward Ratio", value=rr_display)
+                    st.write(f"👉 **Entry Price:** ₹{entry} | **Stop Loss:** ₹{sl}")
                 
                 st.subheader("9. Structural Support & Resistance Confirmation")
                 st.info(sr_confirmation_status)
                 
                 st.subheader("10. Automated Conclusion")
-                st.success(f"**Directional Bias:** {bias.upper()} | **Confidence Score:** {confidence}/10")
-                st.subheader(f"⚡ Suggested Action: `{action.upper()}`")
+                st.success(f"**Directional Bias:** {bias.upper()} | **Suggested Action:** `{action.upper()}` | **Confidence Score:** {confidence}/10")
 
     except Exception as e:
         st.error(f"Execution Error: {str(e)}")
