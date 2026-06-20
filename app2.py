@@ -10,52 +10,68 @@ st.set_page_config(page_title="Automated Price Action Analyzer", page_icon="📈
 st.title("🤖 Advanced Institutional Price Action Analyzer")
 st.markdown("---")
 
-# --- INITIALIZE WATCHLIST STORAGE ---
+# --- INITIALIZE WATCHLIST STORAGE & ACTIVE SELECTION ---
 if "watchlist" not in st.session_state:
     st.session_state["watchlist"] = ["SUNPHARMA", "RELIANCE", "KOTAKBANK", "ADANIPORTS"]
+
+if "active_ticker" not in st.session_state:
+    st.session_state["active_ticker"] = "SUNPHARMA"
+
+# --- CALLBACK FUNCTION FOR DROPDOWN PRIORITY ---
+def handle_dropdown_change():
+    # If the user switches the dropdown, force it to override the manual input text box
+    st.session_state["active_ticker"] = st.session_state["dropdown_selection"]
+    # Clear out the manual text field's session state key so it doesn't fight back
+    if "manual_ticker_input" in st.session_state:
+        st.session_state["manual_ticker_input"] = ""
 
 # Sidebar Configuration
 st.sidebar.header("NSE Stock Selection")
 
-# 1. Watchlist Buttons Section
-st.sidebar.subheader("⭐ My Watchlist")
-if st.session_state["watchlist"]:
-    # Create rows of clickable badge buttons for easy mobile tapping
-    cols = st.sidebar.columns(2)
-    for index, ticker_item in enumerate(st.session_state["watchlist"]):
-        col_side = cols[index % 2]
-        if col_side.button(f"🔍 {ticker_item}", key=f"wl_{ticker_item}", use_container_width=True):
-            st.session_state["active_ticker"] = ticker_item
-else:
-    st.sidebar.caption("Watchlist is empty. Add stocks below!")
+# 1. UPGRADED: Watchlist Dropdown Selector
+st.sidebar.subheader("⭐ My Watchlist Dropdown")
 
-# 2. Main Manual Input / Active Ticker Handler
-if "active_ticker" not in st.session_state:
-    st.session_state["active_ticker"] = "SUNPHARMA"
+# Fallback index tracking to keep selector synced
+default_index = 0
+if st.session_state["active_ticker"] in st.session_state["watchlist"]:
+    default_index = st.session_state["watchlist"].index(st.session_state["active_ticker"])
 
-# We use an empty default string here to let the state handle the values safely
+selected_from_dropdown = st.sidebar.selectbox(
+    "Quick Select Stock:",
+    options=st.session_state["watchlist"],
+    index=default_index,
+    key="dropdown_selection",
+    on_change=handle_dropdown_change
+)
+
+# 2. Main Manual Input (Prioritizes text entry when typed)
+st.sidebar.subheader("🔍 Manual Search")
 raw_ticker = st.sidebar.text_input(
-    "Enter Stock Symbol Manually:", 
-    value="" if st.session_state["active_ticker"] == "" else st.session_state["active_ticker"],
+    "Enter Stock Symbol Manually & Press Enter:", 
+    value="", # Keep empty initially to detect fresh user typing
+    placeholder=f"Current: {st.session_state['active_ticker']}",
     key="manual_ticker_input"
 )
 
-# FIXED: Only overwrite the active ticker if the user actually typed a valid symbol!
-if raw_ticker.strip() != "" and raw_ticker.upper().strip() != st.session_state["active_ticker"]:
+# If the user typed something and hit enter, the manual entry takes priority instantly
+if raw_ticker.strip() != "":
     st.session_state["active_ticker"] = raw_ticker.upper().strip()
 
 ticker = st.session_state["active_ticker"].replace(".NS", "")
 
-# 3. Add / Remove Control Panel
+# 3. Add / Remove Watchlist Controls
 col_add, col_rem = st.sidebar.columns(2)
 if col_add.button("➕ Add to List", use_container_width=True):
     if ticker not in st.session_state["watchlist"] and ticker != "":
         st.session_state["watchlist"].append(ticker)
+        st.session_state["active_ticker"] = ticker
         st.rerun()
 
 if col_rem.button("❌ Remove Current", use_container_width=True):
     if ticker in st.session_state["watchlist"]:
         st.session_state["watchlist"].remove(ticker)
+        # Fall back to first available stock or clear out
+        st.session_state["active_ticker"] = st.session_state["watchlist"][0] if st.session_state["watchlist"] else ""
         st.rerun()
 
 # --- ANALYTICS ENGINE RUNS BELOW ---
