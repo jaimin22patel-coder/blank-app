@@ -58,6 +58,30 @@ if col_rem.button("❌ Remove", use_container_width=True):
         st.session_state["active_ticker"] = st.session_state["watchlist"][0] if st.session_state["watchlist"] else ""
         st.rerun()
 
+# --- MARKET DICTIONARY HELP ENGINE ---
+MSS_HELP = {
+    "📈 Bullish Structure (Higher Highs / Higher Lows)": {
+        "meaning": "The stock is in a confirmed uptrend. Buyers consistently step in at higher prices to protect previous lows.",
+        "action": "🟢 LOOK FOR BUY ENTRIES ONLY near daily major support blocks."
+    },
+    "📉 Bearish Structure (Lower Highs / Lower Lows)": {
+        "meaning": "The stock is in a confirmed markdown phase. Sellers completely dominate, making buying high risk.",
+        "action": "🔴 DO NOT BUY. Order execution desk blocks long trades to avoid catching a falling knife."
+    },
+    "🔄 Structural Shift Detected: High Volatility Expansion": {
+        "meaning": "Market range is widening violently with both higher highs and lower lows. High stop-hunting risk.",
+        "action": "🟡 SIT ON HANDS. Wait for the volatility to contract and structure to stabilize."
+    },
+    "⚖️ Structural Shift Detected: Range Compression / Consolidation": {
+        "meaning": "Price is coiling tightly into a squeeze (Lower Highs + Higher Lows). Institutional energy is storing up.",
+        "action": "🔵 PREPARE FOR EXPLOSION. Watch breakout/breakdown signals closely for the expansion move."
+    },
+    "⚖️ Balanced Structural Consolidation": {
+        "meaning": "Stock is completely flat in an equilibrium dead zone. No institutional momentum direction exists.",
+        "action": "⚪ STAY NEUTRAL. Wait for price to drift into major support or resistance boundaries before action."
+    }
+}
+
 # --- HELPER FUNCTION: CORE STRUCTURAL ZONE ENGINE ---
 def extract_major_institutional_zones(df, current_cmp, zone_pct=0.015):
     prices_high = df['High'].values
@@ -68,7 +92,6 @@ def extract_major_institutional_zones(df, current_cmp, zone_pct=0.015):
     swing_lows = []
     swing_low_wicks = []
     
-    # Isolate structural fractal peaks and valleys
     for i in range(1, len(prices_high) - 1):
         if prices_high[i] > prices_high[i-1] and prices_high[i] > prices_high[i+1]:
             swing_highs.append(prices_high[i])
@@ -114,15 +137,10 @@ def extract_major_institutional_zones(df, current_cmp, zone_pct=0.015):
 
 # --- HELPER FUNCTION: MARKET STRUCTURE SHIFT (MSS) DETECTOR ---
 def detect_market_structure_shift(df):
-    """
-    Tracks sequential pivot points over a 20-day trailing sequence 
-    to classify structural trend shifts (HH/HL vs LH/LL).
-    """
     highs = df['High'].rolling(window=5, center=True).max().dropna().tolist()[-5:]
     lows = df['Low'].rolling(window=5, center=True).min().dropna().tolist()[-5:]
     
     if len(highs) >= 4 and len(lows) >= 4:
-        # Check for structural changes
         is_hh = highs[-1] > highs[-2] and highs[-2] > highs[-3]
         is_hl = lows[-1] > lows[-2] and lows[-2] > lows[-3]
         is_lh = highs[-1] < highs[-2] and highs[-2] < highs[-3]
@@ -165,10 +183,10 @@ if ticker:
             st.sidebar.subheader(f"🇮🇳 Live Feed: {ticker}")
             st.sidebar.metric(label="Current CMP", value=f"₹{latest_close:,}", delta=f"{pct_change}%")
             
-            # 1. PROCESS MARKET STRUCTURE SHIFTS (MSS)
-            structure_desc, trend_bias = detect_market_structure_shift(df)
+            # Process Market Structure
+            structure_msg, trend_bias = detect_market_structure_shift(df)
             
-            # Extract Institutional Zone Boundaries
+            # Extract Institutional Zones
             daily_zones = extract_major_institutional_zones(df, latest_close)
             weekly_zones = extract_major_institutional_zones(df_weekly, latest_close, zone_pct=0.02)
             
@@ -184,8 +202,7 @@ if ticker:
             is_hammer = total_range > 0 and (lower_wick / total_range > 0.55)
             is_shooting_star = total_range > 0 and (upper_wick / total_range > 0.55)
 
-            # 2. PROCESS BREAKOUTS & BREAKDOWNS (With Volume Filters)
-            # 3. PROCESS RETESTS (Look back across trailing 5 sessions)
+            # Breakout and Retest logic
             breakout_status = "⚖️ Neutral: Consolidating cleanly within major structural zones."
             retest_status = "⏳ No active retest pattern flagged."
             setup_allowed = False
@@ -200,65 +217,64 @@ if ticker:
             
             if latest_close > d_res_top:
                 if volume_ratio > 1.4:
-                    breakout_status = f"🚀 VERIFIED INSTITUTIONAL BREAKOUT: Price has convincingly breached the major ceiling of ₹{d_res_top} on high volume ({round(volume_ratio,2)}x)."
+                    breakout_status = f"🚀 VERIFIED INSTITUTIONAL BREAKOUT: Price breached major ceiling of ₹{d_res_top}."
                 else:
-                    breakout_status = f"⚠️ LIQUIDITY TRAP WARNING: Price closed above ₹{d_res_top} but lacks institutional volume backing ({round(volume_ratio,2)}x)."
+                    breakout_status = f"⚠️ LIQUIDITY TRAP: Price closed above ₹{d_res_top} but lacks institutional volume."
             elif latest_close < d_sup_bottom:
                 if volume_ratio > 1.4:
-                    breakout_status = f"💥 VERIFIED INSTITUTIONAL BREAKDOWN: Heavy selling pressure has blown past the major floor of ₹{d_sup_bottom}."
+                    breakout_status = f"💥 VERIFIED INSTITUTIONAL BREAKDOWN: Selling pressure broke the floor of ₹{d_sup_bottom}."
                 else:
-                    breakout_status = f"⚠️ BEAR TRAP WARNING: Price slipped below ₹{d_sup_bottom} on anemic volume."
+                    breakout_status = f"⚠️ BEAR TRAP: Slipped below ₹{d_sup_bottom} on low volume."
             
-            # Process Retests and Confirmed Structural Shifts
             if had_bullish_breakout and (current_low <= d_res_top * 1.01) and (latest_close >= d_res_bottom):
                 if latest_close > current_open or is_hammer:
-                    retest_status = f"✅ RETEST CONFIRMED: Previous Major Resistance (₹{d_res_bottom}) was tested and successfully held as an active support block."
+                    retest_status = f"✅ RETEST CONFIRMED: Previous Resistance (₹{d_res_bottom}) held as active support."
                     if trend_bias == "Bullish":
                         setup_allowed = True
                         trade_status = "Institutional Breakout-Retest Long Verified"
             elif had_bearish_breakdown and (current_high >= d_sup_bottom * 0.99) and (latest_close <= d_sup_top):
                 if latest_close < current_open or is_shooting_star:
-                    retest_status = f"💥 BREAKDOWN RETEST CONFIRMED: Previous Major Support floor has flipped into a firm supply ceiling."
+                    retest_status = f"💥 BREAKDOWN RETEST CONFIRMED: Previous Support floor flipped into supply ceiling."
 
-            # 4. PROCESS REAL-TIME PRICE HOLDS & REJECTIONS
             rejection_status = "No active testing events printing at critical boundaries right now."
             is_testing_support_zone = (latest_close <= d_sup_top * 1.015) and (latest_close >= d_sup_bottom * 0.995)
             is_testing_resistance_zone = (latest_close >= d_res_bottom * 0.985) and (latest_close <= d_res_top * 1.005)
             
             if is_testing_support_zone:
                 if is_hammer or latest_close > current_open:
-                    rejection_status = f"🟢 PRICE HOLD CONFIRMED: Heavy buying interest active inside the institutional support block (₹{d_sup_bottom} - ₹{d_sup_top}). Wicks show order absorption."
+                    rejection_status = f"🟢 PRICE HOLD CONFIRMED: Heavy buying active inside support block (₹{d_sup_bottom} - ₹{d_sup_top})."
                     if trend_bias == "Bullish" and not setup_allowed:
                         setup_allowed = True
                         trade_status = "Major Structural Demand Floor Bounce"
                 else:
-                    rejection_status = "⏳ Price entering institutional demand zone. Monitoring the daily candle print for a structural hold."
+                    rejection_status = "⏳ Price entering demand zone. Waiting for structural confirmation."
             elif is_testing_resistance_zone:
                 if is_shooting_star or latest_close < current_open:
-                    rejection_status = f"🔴 SUPPLY REJECTION CONFIRMED: Institutions are actively defending the major ceiling zone (₹{d_res_bottom} - ₹{d_res_top}). Upper shadows confirm distribution."
+                    rejection_status = f"🔴 SUPPLY REJECTION CONFIRMED: Institutions defending resistance block (₹{d_res_bottom} - ₹{d_res_top})."
 
-            # --- PROCESS RISK EXECUTION GRID (STRICT > 1:1.5 RR & PROTECTION SL) ---
             calculated_sl, target_1, target_2 = 0.0, 0.0, 0.0
             if setup_allowed:
-                # Set Stop Loss 0.2% below the absolute lowest structural wick
                 calculated_sl = round(d_sup_bottom * 0.998, 2)
                 risk_per_share = latest_close - calculated_sl
-                
                 if risk_per_share > 0:
                     target_1 = round(latest_close + (risk_per_share * 1.5), 2)
                     target_2 = round(latest_close + (risk_per_share * 2.5), 2)
-                    
-                    # Overtrading Risk Filter Guardrail
                     if target_1 > d_res_bottom:
                         setup_allowed = False
-                        trade_status = f"❌ Trade Setup Aborted: Target 1 (₹{target_1}) requires breaking the major overhead ceiling (₹{d_res_bottom}) beforehand. Poor risk-reward execution space."
+                        trade_status = f"❌ Setup Aborted: Target 1 (₹{target_1}) requires breaking the major overhead ceiling beforehand."
 
             # --- UI RENDERING ---
             col1, col2 = st.columns(2)
             
             with col1:
                 st.subheader("1. Sequential Market Structure Shifts (MSS)")
-                st.info(structure_desc)
+                st.info(structure_msg)
+                
+                # --- NEW INTERACTIVE DYNAMIC EXPLANATION CARD ---
+                if structure_msg in MSS_HELP:
+                    with st.expander("📖 Explain This Message"):
+                        st.markdown(f"**What it means:** {MSS_HELP[structure_msg]['meaning']}")
+                        st.markdown(f"**Execution Blueprint:** `{MSS_HELP[structure_msg]['action']}`")
                 
                 st.subheader("2. Key Daily Major Structural Zones (1-Year Profile)")
                 st.success(f"🟢 **Institutional Support Block:** ₹{d_sup_bottom} - ₹{d_sup_top} *(Tested {daily_zones['sup_touches']} times)*")
@@ -271,7 +287,7 @@ if ticker:
             with col2:
                 st.subheader("4. Breakout & Breakdown Assessment")
                 st.write(breakout_status)
-                st.caption(f"Current Volume Activity: {round(volume_ratio, 2)}x of the baseline 20-day average.")
+                st.caption(f"Current Volume Activity: {round(volume_ratio, 2)}x of average.")
                 
                 st.subheader("5. Retest Tracker & Structural Rejections")
                 st.warning(f"🔄 **Retest Analysis:** {retest_status}")
@@ -282,10 +298,10 @@ if ticker:
                     st.warning(f"⚠️ **Order Desk Status:** {trade_status}")
                 else:
                     st.success(f"✅ **Execution Order Validated:** {trade_status}")
-                    st.write(f"👉 **Entry Buy Price (Deep Zone Fill):** ₹{latest_close}")
+                    st.write(f"👉 **Entry Buy Price:** ₹{latest_close}")
                     st.write(f"🛡️ **Institutional Protection SL:** ₹{calculated_sl}")
-                    st.write(f"🎯 **Target 1 (Strict 1:1.5 RR Minimum):** ₹{target_1}")
-                    st.write(f"🎯 **Target 2 (Extended 1:2.5 RR Target):** ₹{target_2}")
+                    st.write(f"🎯 **Target 1:** ₹{target_1}")
+                    st.write(f"🎯 **Target 2:** ₹{target_2}")
 
     except Exception as e:
         st.error(f"Execution Error: {str(e)}")
