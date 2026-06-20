@@ -5,9 +5,9 @@ import pandas as pd
 import numpy as np
 
 # Page Configuration
-st.set_page_config(page_title="Automated Price Action Analyzer", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Institutional Structure Analyzer", page_icon="📈", layout="wide")
 
-st.title("🤖 Advanced Institutional Price Action Analyzer")
+st.title("🤖 Major Structural & Institutional Zone Analyzer")
 st.markdown("---")
 
 # --- INITIALIZE WATCHLIST STORAGE & ACTIVE SELECTION ---
@@ -25,24 +25,16 @@ def handle_dropdown_change():
 # Sidebar Configuration
 st.sidebar.header("NSE Stock Selection")
 
-# 1. Watchlist Dropdown Selector
-st.sidebar.subheader("⭐ My Watchlist Dropdown")
-default_index = 0
-if st.session_state["active_ticker"] in st.session_state["watchlist"]:
-    default_index = st.session_state["watchlist"].index(st.session_state["active_ticker"])
-
 selected_from_dropdown = st.sidebar.selectbox(
     "Quick Select Stock:",
     options=st.session_state["watchlist"],
-    index=default_index,
+    index=st.session_state["watchlist"].index(st.session_state["active_ticker"]) if st.session_state["active_ticker"] in st.session_state["watchlist"] else 0,
     key="dropdown_selection",
     on_change=handle_dropdown_change
 )
 
-# 2. Main Manual Input
-st.sidebar.subheader("🔍 Manual Search")
 raw_ticker = st.sidebar.text_input(
-    "Enter Stock Symbol Manually & Press Enter:", 
+    "Enter Stock Symbol Manually:", 
     value="", 
     placeholder=f"Current: {st.session_state['active_ticker']}",
     key="manual_ticker_input"
@@ -53,71 +45,85 @@ if raw_ticker.strip() != "":
 
 ticker = st.session_state["active_ticker"].replace(".NS", "")
 
-# 3. Add / Remove Controls
+# Add/Remove Watchlist Controls
 col_add, col_rem = st.sidebar.columns(2)
-if col_add.button("➕ Add to List", use_container_width=True):
+if col_add.button("➕ Add", use_container_width=True):
     if ticker not in st.session_state["watchlist"] and ticker != "":
         st.session_state["watchlist"].append(ticker)
         st.session_state["active_ticker"] = ticker
         st.rerun()
-
-if col_rem.button("❌ Remove Current", use_container_width=True):
+if col_rem.button("❌ Remove", use_container_width=True):
     if ticker in st.session_state["watchlist"]:
         st.session_state["watchlist"].remove(ticker)
         st.session_state["active_ticker"] = st.session_state["watchlist"][0] if st.session_state["watchlist"] else ""
         st.rerun()
 
-# --- HELPER FUNCTION: FIXED STRUCTURAL PROXIMITY ENGINE ---
-def extract_structural_levels(prices_high, prices_low, current_cmp, zone_pct=0.015):
-    swing_highs = []
-    swing_lows = []
+# --- HELPER FUNCTION: INSTITUTIONAL ZONE ENGINE ---
+def extract_major_institutional_zones(df, current_cmp, zone_pct=0.015):
+    """
+    Identifies major structural turning points based on historical touch depth, 
+    returning horizontal ranges (zones) and the absolute structural wicks for SL placement.
+    """
+    prices_high = df['High'].values
+    prices_low = df['Low'].values
     
-    # 1. Isolate structural fractal peaks and valleys (3-candle window)
+    swing_highs = []
+    swing_high_wicks = []
+    swing_lows = []
+    swing_low_wicks = []
+    
+    # 1. Isolate structural fractal peaks and valleys
     for i in range(1, len(prices_high) - 1):
         if prices_high[i] > prices_high[i-1] and prices_high[i] > prices_high[i+1]:
             swing_highs.append(prices_high[i])
+            swing_high_wicks.append(prices_high[i])
         if prices_low[i] < prices_low[i-1] and prices_low[i] < prices_low[i+1]:
             swing_lows.append(prices_low[i])
+            swing_low_wicks.append(prices_low[i])
             
-    # 2. Cluster pivots into horizontal price zones
-    def cluster_points(points):
+    # 2. Cluster pivots into dense horizontal zones
+    def cluster_zones(points, original_wicks):
         clusters = {}
-        for p in points:
+        for idx, p in enumerate(points):
             matched = False
             for base in clusters:
                 if abs(p - base) / base <= zone_pct:
-                    clusters[base] += 1
+                    clusters[base]["count"] += 1
+                    clusters[base]["wicks"].append(original_wicks[idx])
                     matched = True
                     break
             if not matched:
-                clusters[p] = 1
+                clusters[p] = {"count": 1, "wicks": [original_wicks[idx]]}
         return clusters
 
-    sup_clusters = cluster_points(swing_lows)
-    res_clusters = cluster_points(swing_highs)
+    sup_clusters = cluster_zones(swing_lows, swing_low_wicks)
+    res_clusters = cluster_zones(swing_highs, swing_high_wicks)
     
-    # 3. FIXED PROXIMITY SORTING (Closest level to price always becomes Immediate)
-    all_sups = sorted([k for k in sup_clusters.keys() if k < current_cmp], reverse=True)
-    all_ress = sorted([k for k in res_clusters.keys() if k > current_cmp])
+    # 3. Filter by touch count weight to extract the absolute MAJOR levels
+    major_sups = sorted([k for k, v in sup_clusters.items() if k < current_cmp and v["count"] >= 3], reverse=True)
+    major_ress = sorted([k for k, v in res_clusters.items() if k > current_cmp and v["count"] >= 3])
     
-    # Support Mapping Logic
-    d_imm_sup = all_sups[0] if len(all_sups) > 0 else current_cmp * 0.98
-    d_maj_sup = all_sups[1] if len(all_sups) > 1 else d_imm_sup * 0.95
+    # Default fallback boundaries if no 3-touch level exists yet
+    maj_sup = major_sups[0] if len(major_sups) > 0 else current_cmp * 0.95
+    maj_res = major_ress[0] if len(major_ress) > 0 else current_cmp * 1.05
     
-    # Resistance Mapping Logic
-    d_imm_res = all_ress[0] if len(all_ress) > 0 else current_cmp * 1.02
-    d_maj_res = all_ress[1] if len(all_ress) > 1 else d_imm_res * 1.05
+    # 4. Extract absolute structural outer wicks for institutional protection
+    sup_wicks = sup_clusters.get(maj_sup, {"wicks": [maj_sup * 0.995]})["wicks"]
+    res_wicks = res_clusters.get(maj_res, {"wicks": [maj_res * 1.005]})["wicks"]
+    
+    absolute_lowest_wick = min(sup_wicks)
+    absolute_highest_wick = max(res_wicks)
     
     return {
-        "immediate_support": d_imm_sup,
-        "major_support": d_maj_sup,
-        "immediate_resistance": d_imm_res,
-        "major_resistance": d_maj_res,
-        "sup_counts": sup_clusters,
-        "res_counts": res_clusters
+        "major_support_level": maj_sup,
+        "major_support_zone_bottom": absolute_lowest_wick,
+        "major_resistance_level": maj_res,
+        "major_resistance_zone_top": absolute_highest_wick,
+        "sup_touches": sup_clusters.get(maj_sup, {"count": 0})["count"],
+        "res_touches": res_clusters.get(maj_res, {"count": 0})["count"]
     }
 
-# --- ANALYTICS ENGINE RUNS BELOW ---
+# --- ANALYTICS ENGINE ---
 if ticker:
     try:
         yf_symbol = f"{ticker}.NS"
@@ -130,176 +136,92 @@ if ticker:
             latest_close = round(float(df['Close'].iloc[-1]), 2)
             prev_close = round(float(df['Close'].iloc[-2]), 2)
             pct_change = round(((latest_close - prev_close) / prev_close) * 100, 2)
-            volume_latest = int(df['Volume'].iloc[-1])
-            volume_avg = int(df['Volume'].rolling(window=20).mean().iloc[-1])
             
-            current_high = round(float(df['High'].iloc[-1]), 2)
-            current_low = round(float(df['Low'].iloc[-1]), 2)
-            current_open = round(float(df['Open'].iloc[-1]), 2)
-            
-            # Sub-sidebar Renders
             st.sidebar.markdown("---")
             st.sidebar.subheader(f"🇮🇳 Live Feed: {ticker}")
             st.sidebar.metric(label="Current CMP", value=f"₹{latest_close:,}", delta=f"{pct_change}%")
             
-            # --- EXTRACT MULTI-TIMEFRAME LEVEL MATRICES ---
-            daily_levels = extract_structural_levels(df['High'].values, df['Low'].values, latest_close)
-            weekly_levels = extract_structural_levels(df_weekly['High'].values, df_weekly['Low'].values, latest_close)
+            # Run Zone Extraction Engines
+            daily_zones = extract_major_institutional_zones(df, latest_close)
+            weekly_zones = extract_major_institutional_zones(df_weekly, latest_close, zone_pct=0.02)
             
-            d_immediate_sup = daily_levels["immediate_support"]
-            d_major_sup = daily_levels["major_support"]
-            d_immediate_res = daily_levels["immediate_resistance"]
-            d_major_res = daily_levels["major_resistance"]
+            # --- RETAIN MATRICES FOR DISPLAY ---
+            d_sup_top = round(daily_zones["major_support_level"], 2)
+            d_sup_bottom = round(daily_zones["major_support_zone_bottom"], 2)
+            d_res_bottom = round(daily_zones["major_resistance_level"], 2)
+            d_res_top = round(daily_zones["major_resistance_zone_top"], 2)
             
-            imm_sup_touches = daily_levels["sup_counts"].get(d_immediate_sup, 2)
-            maj_sup_touches = daily_levels["sup_counts"].get(d_major_sup, 4)
-            imm_res_touches = daily_levels["res_counts"].get(d_immediate_res, 2)
-            maj_res_touches = daily_levels["res_counts"].get(d_major_res, 4)
-            
-            # --- TREND LOGIC ---
+            w_sup_top = round(weekly_zones["major_support_level"], 2)
+            w_sup_bottom = round(weekly_zones["major_support_zone_bottom"], 2)
+            w_res_bottom = round(weekly_zones["major_resistance_level"], 2)
+            w_res_top = round(weekly_zones["major_resistance_zone_top"], 2)
+
+            # --- TREND ENGINES ---
             df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
             df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
-            df_weekly['EMA_50'] = df_weekly['Close'].ewm(span=50, adjust=False).mean()
+            daily_trend = "Uptrend" if df['Close'].iloc[-1] > df['EMA_50'].iloc[-1] > df['EMA_200'].iloc[-1] else "Downtrend" if df['Close'].iloc[-1] < df['EMA_50'].iloc[-1] < df['EMA_200'].iloc[-1] else "Range-bound"
+
+            # --- CONSERVATIVE BREAKOUT TRACKER ENGINE ---
+            if latest_close > d_res_top:
+                market_state = f"🚀 MAJOR DAILY BREAKOUT: Price has completely cleared the supply zone ceiling of ₹{d_res_top}."
+            elif latest_close < d_sup_bottom:
+                market_state = f"📉 MAJOR DAILY BREAKDOWN: Price has collapsed beneath the heavy institutional floor of ₹{d_sup_bottom}."
+            else:
+                market_state = f"⚖️ CONSOLIDATION: Price is safely trading between the daily major structural boundaries (₹{d_sup_top} - ₹{d_res_bottom})."
+
+            # --- AUTOMATED ALGORITHMIC TRADE GRID SETUP ---
+            trade_status = "Awaiting Valid Setup Conditions"
+            setup_allowed = False
             
-            daily_trend = "Range-bound"
-            if df['Close'].iloc[-1] > df['EMA_50'].iloc[-1] > df['EMA_200'].iloc[-1]:
-                daily_trend = "Uptrend"
-            elif df['Close'].iloc[-1] < df['EMA_50'].iloc[-1] < df['EMA_200'].iloc[-1]:
-                daily_trend = "Downtrend"
+            # Strategy Conditions: Long Entry if price pulls down close to the major support block
+            is_near_support_buy_zone = (latest_close <= d_sup_top * 1.015) and (latest_close >= d_sup_bottom)
+            
+            if daily_trend == "Uptrend" and is_near_support_buy_zone:
+                # 1. Market Structure Stop Loss Placement (0.2% below the absolute lowest wick)
+                calculated_sl = round(d_sup_bottom * 0.998, 2)
+                risk_per_share = latest_close - calculated_sl
                 
-            weekly_trend = "Range-bound"
-            if df_weekly['Close'].iloc[-1] > df_weekly['EMA_50'].iloc[-1]:
-                weekly_trend = "Uptrend"
-            elif df_weekly['Close'].iloc[-1] < df_weekly['EMA_50'].iloc[-1]:
-                weekly_trend = "Downtrend"
-                
-            wave_seq = "Higher Highs / Higher Lows (HH/HL)" if daily_trend == "Uptrend" else "Lower Highs / Lower Lows (LH/LL)" if daily_trend == "Downtrend" else "Equal Highs / Lows (Chop)"
-
-            # Candlestick Calculations
-            body = abs(latest_close - current_open)
-            total_range = current_high - current_low
-            lower_wick = min(current_open, latest_close) - current_low
-            upper_wick = current_high - max(current_open, latest_close)
-            is_hammer = total_range > 0 and (lower_wick / total_range > 0.6)
-            is_shooting_star = total_range > 0 and (upper_wick / total_range > 0.6)
-
-            # --- BREAKOUT ENGINE ---
-            retest_status = "Awaiting Initial Structural Breach"
-            bo_prob = "No Breakout"
-            bo_val_range = "⚖️ CONSOLIDATION: Price trading inside structural boundaries."
-            
-            recent_closes = df['Close'].iloc[-6:-1].tolist()
-            recent_lows = df['Low'].iloc[-6:-1].tolist()
-            recent_highs = df['High'].iloc[-6:-1].tolist()
-            
-            had_bullish_breach = any(c > d_immediate_res for c in recent_closes)
-            had_bearish_breach = any(c < d_immediate_sup for c in recent_closes)
-            
-            volume_ratio = volume_latest / volume_avg
-            
-            if latest_close > d_immediate_res:
-                bo_prob = "High (Raw Breakout)" if volume_ratio > 1.5 else "Low (Potential Trap)"
-                retest_status = "🏃 Awaiting Retest (Raw Breakout printing)"
-                bo_val_range = f"🚀 INITIAL BREACH: Range: ₹{round(d_immediate_res, 2)} to ₹{round(d_immediate_res * 1.015, 2)}."
-            elif latest_close < d_immediate_sup:
-                bo_prob = "High (Raw Breakdown)" if volume_ratio > 1.5 else "Low (Potential Trap)"
-                retest_status = "🏃 Awaiting Retest (Raw Breakdown printing)"
-                bo_val_range = f"💥 INITIAL BREACH: Range: ₹{round(d_immediate_sup * 0.985, 2)} to ₹{round(d_immediate_sup, 2)}."
-            elif had_bullish_breach:
-                returned_to_zone = any(l <= (d_immediate_res * 1.015) and l >= (d_immediate_res * 0.985) for l in recent_lows)
-                if returned_to_zone:
-                    if latest_close > current_open or is_hammer:
-                        retest_status = "✅ RETEST CONFIRMED: Old resistance floor successfully transformed into active support."
-                        bo_prob = "High (Retest Verified)" if volume_ratio >= 1.2 else "Medium"
-                        bo_val_range = f"🚀 RETEST BUY ENTRY LIVE: Zone: ₹{round(d_immediate_res, 2)} - ₹{round(d_immediate_res * 1.015, 2)}."
+                if risk_per_share > 0:
+                    # 2. Enforce Strict Minimum 1:1.5 Risk-to-Reward Ratio Target
+                    target_1 = round(latest_close + (risk_per_share * 1.5), 2)
+                    target_2 = round(latest_close + (risk_per_share * 2.5), 2)
+                    
+                    # 3. Overtrading Safety Filter Check
+                    if target_1 <= d_res_bottom:
+                        setup_allowed = True
+                        trade_status = "Validated Long Setup"
                     else:
-                        retest_status = "⏳ RETEST IN PROGRESS: Pullback underway. Awaiting daily confirmation."
-                        bo_prob = "Evaluating"
-                        bo_val_range = "⚠️ HOLD ENTRIES: Price is directly on the line."
-            elif had_bearish_breach:
-                returned_to_zone = any(h >= (d_immediate_sup * 0.985) and h <= (d_immediate_sup * 1.015) for h in recent_highs)
-                if returned_to_zone:
-                    if latest_close < current_open or is_shooting_star:
-                        retest_status = "💥 BREAKDOWN RETEST CONFIRMED: Old support completely turned into active ceiling."
-                        bo_prob = "High (Retest Verified)" if volume_ratio >= 1.2 else "Medium"
-                        bo_val_range = f"📉 RETEST SHORT ENTRY LIVE: Zone: ₹{round(d_immediate_sup * 0.985, 2)} - ₹{round(d_immediate_sup, 2)}."
-                    else:
-                        retest_status = "⏳ SHORT RETEST IN PROGRESS: Price has bounced to old support floor."
-                        bo_prob = "Evaluating"
-                        bo_val_range = "⚠️ HOLD SHORTS: Price is resting on the line."
-
-            # --- STRUCTURAL CONFIRMATION ---
-            sr_confirmation_status = "No testing event at immediate key levels right now."
-            near_support_zone = latest_close <= (d_immediate_sup * 1.02)
-            near_resistance_zone = latest_close >= (d_immediate_res * 0.98)
+                        trade_status = "❌ Setup Blocked: Target 1 falls inside overhead resistance. Insufficient Risk-Reward Window."
             
-            if near_support_zone and (is_hammer or latest_close > current_open):
-                sr_confirmation_status = f"✅ DEMAND HOLD CONFIRMED: Held {imm_sup_touches} times over the last year."
-            elif near_resistance_zone and (is_shooting_star or latest_close < current_open):
-                sr_confirmation_status = f"⚠️ SUPPLY REJECTION CONFIRMED: Rejected price expansion {imm_res_touches} times historically."
-
-            # --- RISK FILTER SETUP ---
-            raw_setup_type = "No Setup Available"
-            entry, sl, t1, t2, rr_display, action, bias = latest_close, 0.0, 0.0, 0.0, "N/A", "Wait / Sit on Hands", "Neutral"
-            confidence = 5
-
-            if daily_trend == "Uptrend" and "CONFIRMED" in retest_status:
-                raw_setup_type = "Retest Verified Long Setup"
-                entry = latest_close
-                sl = round(d_immediate_sup * 0.99, 2)
-                t1 = round(d_immediate_res, 2)
-                t2 = round(d_major_res, 2)
-                bias, action, confidence = "Bullish", "Buy", 9
-
             # --- UI RENDERING ---
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("1. Market Structure")
-                st.write(f"**Daily Chart Bias:** `{daily_trend}`")
-                st.write(f"**Weekly Chart Bias:** `{weekly_trend}`")
-                st.write(f"**Wave Sequence:** {wave_seq}")
+                st.subheader("1. Trend Context Matrix")
+                st.write(f"**Daily Framework Bias:** `{daily_trend}`")
                 
-                st.subheader("2. Key Support Levels (Multi-Timeframe)")
-                st.write(f"📅 **Daily Immediate Support:** ₹{round(d_immediate_sup, 2)} *(Tested {imm_sup_touches} times)*")
-                st.write(f"📅 **Daily Major Floor:** ₹{round(d_major_sup, 2)} *(Tested {maj_sup_touches} times)*")
-                st.write(f"🗓️ **Weekly Macro Support:** ₹{round(weekly_levels['major_support'], 2)}")
+                st.subheader("2. Key Daily Major Zones (1-Year Profile)")
+                st.success(f"🟢 **Major Support Zone:** ₹{d_sup_bottom} - ₹{d_sup_top} *(Tested {daily_zones['sup_touches']} times)*")
+                st.error(f"🔴 **Major Resistance Zone:** ₹{d_res_bottom} - ₹{d_res_top} *(Tested {daily_zones['res_touches']} times)*")
                 
-                st.subheader("3. Key Resistance Levels (Multi-Timeframe)")
-                st.write(f"📅 **Daily Immediate Resistance:** ₹{round(d_immediate_res, 2)} *(Tested {imm_res_touches} times)*")
-                st.write(f"📅 **Daily Major Ceiling:** ₹{round(d_major_res, 2)} *(Tested {maj_res_touches} times)*")
-                st.write(f"🗓️ **Weekly Macro Resistance:** ₹{round(weekly_levels['major_resistance'], 2)}")
-                
-                st.subheader("4. Price Action Interpretation")
-                st.markdown("**🟢 Demand Zones:**")
-                st.write(f"* **Immediate (Touches: {imm_sup_touches}):** ₹{round(d_immediate_sup, 2)} - ₹{round(d_immediate_sup * 1.015, 2)}")
-                st.markdown("**🔴 Supply Zones:**")
-                st.write(f"* **Immediate (Touches: {imm_res_touches}):** ₹{round(d_immediate_res * 0.985, 2)} - ₹{round(d_immediate_res, 2)}")
-
-                st.subheader("5. Candlestick Analysis")
-                st.write(f"**Observed Formations:** {'Hammer Rejection' if is_hammer else 'Shooting Star' if is_shooting_star else 'Consolidation Candle'}")
+                st.subheader("3. Key Weekly Macro Zones (2-Year Profile)")
+                st.markdown(f"**🔷 Weekly Heavy Floor:** ₹{w_sup_bottom} - ₹{w_sup_top} *(Tested {weekly_zones['sup_touches']} times)*")
+                st.markdown(f"**🔶 Weekly Heavy Ceiling:** ₹{w_res_bottom} - ₹{w_res_top} *(Tested {weekly_zones['res_touches']} times)*")
 
             with col2:
-                st.subheader("6. Breakout / Breakdown Assessment")
-                st.write(f"**Retest Verification Score:** `{bo_prob}`")
-                st.write(f"**Volume Multiplier:** {round(volume_ratio, 2)}x")
-                st.warning(bo_val_range)
+                st.subheader("4. Market State Assessment")
+                st.info(market_state)
                 
-                st.subheader("7. Retest Analysis")
-                st.info(f"🔄 **Retest Tracking Engine:** {retest_status}")
-                
-                st.subheader("8. Algorithmic Trade Setup (Risk Filtered)")
-                if raw_setup_type == "No Setup Available":
-                    st.warning("⚠️ No Trade Setup Generated: Waiting for a verified high-volume retest bounce to confirm structural invalidation levels.")
+                st.subheader("5. Algorithmic Order Block Setup")
+                if not setup_allowed:
+                    st.warning(f"⚠️ Status: {trade_status}")
                 else:
-                    st.info(f"**Structure Found:** {raw_setup_type}")
-                    st.write(f"👉 **Entry Price:** ₹{entry} | **Stop Loss:** ₹{sl} | **Targets:** ₹{t1} / ₹{t2}")
-                
-                st.subheader("9. Structural Support & Resistance Confirmation")
-                st.info(sr_confirmation_status)
-                
-                st.subheader("10. Automated Conclusion")
-                st.success(f"**Directional Bias:** {bias.upper()} | **Suggested Action:** `{action.upper()}` | **Confidence Score:** {confidence}/10")
+                    st.success(f"✅ **Structure Found:** {trade_status}")
+                    st.write(f"👉 **Entry Buy Zone:** Market Price (₹{latest_close})")
+                    st.write(f"🛡️ **Institutional SL (Below Structure Wicks):** ₹{calculated_sl}")
+                    st.write(f"🎯 **Target 1 (Strict 1:1.5 Risk RR):** ₹{target_1}")
+                    st.write(f"🎯 **Target 2 (Extended 1:2.5 RR):** ₹{target_2}")
+                    st.caption("Notice: This order profile is automatically blocked if target criteria cannot be mathematical achieved before hitting major resistance boundaries.")
 
     except Exception as e:
         st.error(f"Execution Error: {str(e)}")
