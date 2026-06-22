@@ -105,7 +105,7 @@ def extract_pure_order_blocks(df, current_cmp, zone_pct=0.012):
             swing_lows.append(max(opens[i], closes[i]))  # Zone Ceiling
             swing_low_bottoms.append(lows[i])            # Zone Floor
             
-    # 2. Cluster pivots into dense ranges
+   # 2. Cluster pivots into dense ranges
     def build_clusters(bases, extremities, find_above):
         clusters = {}
         for idx, base in enumerate(bases):
@@ -120,10 +120,12 @@ def extract_pure_order_blocks(df, current_cmp, zone_pct=0.012):
                 clusters[base] = {"count": 1, "extremes": [extremities[idx]]}
                 
         sorted_clusters = sorted(clusters.items(), key=lambda x: x[1]["count"], reverse=True)
+        
+        # FIXED: Removed the walrus operator assignment syntax error
         if find_above:
-            filtered = [c for c in sorted_clusters if x := c[0] > current_cmp]
+            filtered = [c for c in sorted_clusters if c[0] > current_cmp]
         else:
-            filtered = [c for c in sorted_clusters if x := c[0] < current_cmp]
+            filtered = [c for c in sorted_clusters if c[0] < current_cmp]
             
         return filtered[0] if len(filtered) > 0 else (None, {"count": 1, "extremes": [current_cmp * (1.05 if find_above else 0.95)]})
 
