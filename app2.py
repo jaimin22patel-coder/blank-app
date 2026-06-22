@@ -136,4 +136,24 @@ with col2:
         elif chart_image is None:
             st.error("❌ There is no generated stock chart to analyze yet.")
         else:
-            with st.spinner(f"Analyzing institutional footprints for {ticker_name}...
+            with st.spinner(f"Analyzing institutional footprints for {ticker_name}..."):
+                try:
+                    # Connect via the current generation client standard
+                    client = genai.Client(api_key=api_key)
+                    
+                    # Combine image content and system structure parameters
+                    content_payload = [
+                        chart_image,
+                        f"Analyze this auto-generated chart for ticker: {ticker_name}.\n" + INSTITUTIONAL_PROMPT
+                    ]
+                    
+                    response = client.models.generate_content(
+                        model=model_choice,
+                        contents=content_payload
+                    )
+                    
+                    st.markdown(response.text)
+                    st.success("✅ Analysis Complete!")
+                    
+                except Exception as e:
+                    st.error(f"An error occurred during processing: {str(e)}")
