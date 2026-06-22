@@ -21,7 +21,9 @@ st.markdown("---")
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
 api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
-model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
+
+# Upgraded model list: Prioritizing gemini-2.0-flash for high free daily limits (1500 RPD)
+model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.0-flash", "gemini-2.5-flash"])
 
 st.sidebar.markdown("""
 ### Indian Market Format:
@@ -32,7 +34,7 @@ Add `.NS` for NSE stocks or `.BO` for BSE stocks.
 # Strictly engineered prompt forcing a standardized Markdown Table layout
 INSTITUTIONAL_PROMPT = """
 You are an Institutional Price Action Analyst specializing in smart money concepts. 
-Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
+Analyze the provided chart along with the calculated core mathematical data to extract primary horizontal price levels where major institutional orders are resting, trapped, or deploying.
 
 You must present your core findings strictly using this exact structural layout:
 
@@ -65,6 +67,7 @@ with col1:
     time_interval = st.selectbox("Candle Timeframe", ["1d", "1wk"], index=0)
 
     chart_image = None
+    market_data_summary = ""
 
     if ticker_name:
         with st.spinner(f"Fetching chart for {ticker_name}..."):
@@ -75,6 +78,21 @@ with col1:
                 if df.empty:
                     st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
                 else:
+                    # --- MATH ENGINES (PROMPT GROUNDING) ---
+                    # Gather cold numerical data natively for free to avoid AI vision hallucination 
+                    last_close = df['Close'].iloc[-1]
+                    high_period = df['High'].max()
+                    low_period = df['Low'].min()
+                    sma_20 = df['Close'].rolling(window=20).mean().iloc[-1]
+                    
+                    market_data_summary = f"""
+                    Recent Close Price: {last_close:.2f}
+                    Period Structural High: {high_period:.2f}
+                    Period Structural Low: {low_period:.2f}
+                    20-Period Simple Moving Average: {sma_20:.2f} if available else N/A
+                    """
+                    
+                    # --- CHART RENDERING ENGINE ---
                     buf = io.BytesIO()
                     custom_style = mpf.make_mpf_style(
                         base_mpf_style='yahoo', 
@@ -104,8 +122,15 @@ with col2:
             with st.spinner(f"Parsing institutional footprints for {ticker_name}..."):
                 try:
                     client = genai.Client(api_key=final_api_key)
-                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
-                    response = client.models.generate_content(model=model_choice, contents=content_payload)
+                    
+                    # Merge structured system text instructions with mathematical hard facts
+                    full_prompt = f"{INSTITUTIONAL_PROMPT}\n\n[CRITICAL MATHEMATICAL DATA FOR VERIFICATION]:\n{market_data_summary}"
+                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + full_prompt]
+                    
+                    response = client.models.generate_content(
+                        model=model_choice, 
+                        contents=content_payload
+                    )
                     raw_text = response.text
                     
                     # Core variables parsing engine
@@ -138,4 +163,8 @@ with col2:
                     st.markdown(clear_markdown_body)
                         
                 except Exception as e:
-                    st.error(f"An error occurred during processing: {str(e)}")
+                    # Added clear descriptive handling for quota issues
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        st.error("❌ Free Tier Limit Reached. Please switch the selected model option to 'gemini-2.0-flash' in the sidebar or check back later.")
+                    else:
+                        st.error(f"An error occurred during processing: {str(e)}")
