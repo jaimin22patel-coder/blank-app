@@ -4,7 +4,6 @@ import mplfinance as mpf
 import io
 import base64
 import requests
-import json
 from PIL import Image
 
 # Set page configuration
@@ -16,22 +15,28 @@ st.set_page_config(
 
 # Application Header
 st.title("📊 Auto-Institutional Price Action Stock Analyzer")
-st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute Smart Money analysis via OpenRouter Free Tier.")
+st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute Smart Money analysis via OpenRouter.")
 st.markdown("---")
 
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
 openrouter_key = st.sidebar.text_input("Enter OpenRouter API Key", type="password")
 
+# Free Multimodal/Vision models on OpenRouter
+free_model_choice = st.sidebar.selectbox(
+    "Choose Free Vision Model", 
+    [
+        "google/gemma-4-26b-a4b-it:free",      # Excellent chart & spatial reasoning
+        "nvidia/nemotron-3-super-120b-a12b:free" # Highly capable multimodal vision model
+    ]
+)
+
 st.sidebar.markdown("""
-### 💡 Getting a Free Key:
-1. Go to [openrouter.ai](https://openrouter.ai/)
-2. Create a free account.
-3. Go to **Keys**, generate one, and paste it here. No credit card required.
+### 💡 Troubleshooting 404 Errors:
+If a model returns a `404` or "unavailable" error, OpenRouter has temporarily rotated it out. Simply select the other model from the dropdown above to continue analyzing charts for free.
                     
 ### Indian Market Format:
 Add `.NS` for NSE stocks or `.BO` for BSE stocks.
-* *Example:* `RELIANCE.NS`, `SBIN.NS`.
 """)
 
 # Strictly engineered prompt forcing a standardized Markdown Table layout
@@ -105,7 +110,7 @@ with col2:
         elif chart_image is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
-            with st.spinner(f"Processing footprints via OpenRouter (Gemini Flash Free)..."):
+            with st.spinner(f"Processing footprints via OpenRouter ({free_model_choice})..."):
                 try:
                     # Step 1: Convert the PIL image to a Base64 String
                     buffered = io.BytesIO()
@@ -120,9 +125,9 @@ with col2:
                         "Content-Type": "application/json"
                     }
                     
-                    # Using the direct Gemini 2.5 Flash Free endpoint
+                    # Dynamically passing selected free model choice
                     payload = {
-                        "model": "google/gemini-2.5-flash:free",
+                        "model": free_model_choice,
                         "messages": [
                             {
                                 "role": "user",
@@ -169,7 +174,6 @@ with col2:
                         m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
                         st.markdown("---")
                         
-                        # Injects the structured markdown block output cleanly
                         st.markdown(clear_markdown_body)
                         
                 except Exception as e:
