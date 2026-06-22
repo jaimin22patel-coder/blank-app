@@ -1,10 +1,10 @@
 import streamlit as st
+from google import genai
+from PIL import Image
 import yfinance as yf
 import mplfinance as mpf
 import io
-import base64
-import requests
-from PIL import Image
+import os
 
 # Set page configuration
 st.set_page_config(
@@ -15,42 +15,24 @@ st.set_page_config(
 
 # Application Header
 st.title("📊 Auto-Institutional Price Action Stock Analyzer")
-st.caption("Enter any global or Indian ticker to execute Smart Money analysis via OpenRouter.")
+st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute Smart Money analysis.")
 st.markdown("---")
 
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
-openrouter_key = st.sidebar.text_input("Enter OpenRouter API Key", type="password")
-
-# Analysis Mode Selection to guarantee free tier uptime
-analysis_mode = st.sidebar.selectbox(
-    "Select Analysis Engine Mode",
-    ["Visual Chart Analysis (Image)", "Data-Table Analysis (Text-Only)"]
-)
-
-# Free models available based on mode
-if analysis_mode == "Visual Chart Analysis (Image)":
-    free_model_choice = st.sidebar.selectbox(
-        "Choose Free Vision Model", 
-        ["google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3-super-120b-a12b:free"]
-    )
-else:
-    # Text models have massive rate limits compared to vision models
-    free_model_choice = st.sidebar.selectbox(
-        "Choose Free Text Model",
-        ["meta-llama/llama-3.3-70b-instruct:free", "google/gemini-2.5-flash:free"]
-    )
+api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
+model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
 st.sidebar.markdown("""
-### 💡 Free-Tier Optimization Tips:
-- **Visual Mode** uses the image. If it returns a `429 upstream` error, it means the public key is busy. 
-- **Data-Table Mode** converts your stock chart values into historical text rows. It is **extremely reliable**, lightning fast, and rarely hits rate limits.
+### Indian Market Format:
+Add `.NS` for NSE stocks or `.BO` for BSE stocks.
+* *Example:* `RELIANCE.NS`, `SBIN.NS`.
 """)
 
 # Strictly engineered prompt forcing a standardized Markdown Table layout
 INSTITUTIONAL_PROMPT = """
 You are an Institutional Price Action Analyst specializing in smart money concepts. 
-Analyze the provided market structure data and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
+Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
 
 You must present your core findings strictly using this exact structural layout:
 
@@ -83,7 +65,6 @@ with col1:
     time_interval = st.selectbox("Candle Timeframe", ["1d", "1wk"], index=0)
 
     chart_image = None
-    historical_data_text = ""
 
     if ticker_name:
         with st.spinner(f"Fetching chart for {ticker_name}..."):
@@ -94,11 +75,6 @@ with col1:
                 if df.empty:
                     st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
                 else:
-                    # Save a sample string of raw prices to use if user goes text-only mode
-                    # Selecting tail values to prevent payload bloat
-                    df_summary = df[['Open', 'High', 'Low', 'Close', 'Volume']].tail(60)
-                    historical_data_text = df_summary.to_string()
-
                     buf = io.BytesIO()
                     custom_style = mpf.make_mpf_style(
                         base_mpf_style='yahoo', 
@@ -117,76 +93,49 @@ with col1:
 
 with col2:
     st.subheader("⚡ Automated Institutional Report")
+    final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
     
     if st.button("Run Smart Money Analysis", type="primary"):
-        if not openrouter_key:
-            st.error("❌ Please configure your OpenRouter API Key.")
+        if not final_api_key:
+            st.error("❌ Please configure your Gemini API Key.")
         elif chart_image is None:
-            st.error("❌ No data available to analyze.")
+            st.error("❌ No generated stock chart to analyze.")
         else:
-            with st.spinner(f"Processing footprints via OpenRouter ({free_model_choice})..."):
+            with st.spinner(f"Parsing institutional footprints for {ticker_name}..."):
                 try:
-                    api_url = "https://openrouter.ai/api/v1/chat/completions"
-                    headers = {
-                        "Authorization": f"Bearer {openrouter_key}",
-                        "Content-Type": "application/json"
-                    }
+                    client = genai.Client(api_key=final_api_key)
+                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
+                    response = client.models.generate_content(model=model_choice, contents=content_payload)
+                    raw_text = response.text
                     
-                    # Constructing Payload dynamically based on the mode selected
-                    if analysis_mode == "Visual Chart Analysis (Image)":
-                        buffered = io.BytesIO()
-                        chart_image.save(buffered, format="PNG")
-                        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                        data_url = f"data:image/png;base64,{img_base64}"
-                        
-                        contents = [
-                            {"type": "text", "text": f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT},
-                            {"type": "image_url", "image_url": {"url": data_url}}
-                        ]
-                    else:
-                        # Text-Only Mode passes the prompt + historical numbers
-                        text_payload = f"Ticker: {ticker_name}\n\nHistorical Price Rows (Date, Open, High, Low, Close, Volume):\n{historical_data_text}\n\n{INSTITUTIONAL_PROMPT}"
-                        contents = [
-                            {"type": "text", "text": text_payload}
-                        ]
-
-                    payload = {
-                        "model": free_model_choice,
-                        "messages": [{"role": "user", "content": contents}]
-                    }
+                    # Core variables parsing engine
+                    verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
                     
-                    response = requests.post(api_url, headers=headers, json=payload)
+                    lines = raw_text.split("\n")
+                    remaining_lines = []
                     
-                    if response.status_code != 200:
-                        st.error(f"OpenRouter API Error ({response.status_code}): {response.text}")
-                    else:
-                        result = response.json()
-                        raw_text = result['choices'][0]['message']['content']
-                        
-                        # Parsing logic
-                        verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
-                        lines = raw_text.split("\n")
-                        remaining_lines = []
-                        
-                        for line in lines:
-                            if line.startswith("VERDICT:"): 
-                                verdict = line.replace("VERDICT:", "").strip()
-                            elif line.startswith("BULLISH_SCORE:"): 
-                                bullish = line.replace("BULLISH_SCORE:", "").strip()
-                            elif line.startswith("BEARISH_SCORE:"): 
-                                bearish = line.replace("BEARISH_SCORE:", "").strip()
-                            else:
-                                remaining_lines.append(line)
-                                
-                        clear_markdown_body = "\n".join(remaining_lines).strip()
-                        
-                        # UI Display
-                        st.success(f"### 🏁 Final Verdict: {verdict}")
-                        m_col1, m_col2 = st.columns(2)
-                        m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
-                        m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
-                        st.markdown("---")
-                        st.markdown(clear_markdown_body)
+                    for line in lines:
+                        if line.startswith("VERDICT:"): 
+                            verdict = line.replace("VERDICT:", "").strip()
+                        elif line.startswith("BULLISH_SCORE:"): 
+                            bullish = line.replace("BULLISH_SCORE:", "").strip()
+                        elif line.startswith("BEARISH_SCORE:"): 
+                            bearish = line.replace("BEARISH_SCORE:", "").strip()
+                        else:
+                            remaining_lines.append(line)
+                            
+                    clear_markdown_body = "\n".join(remaining_lines).strip()
+                    
+                    # UI Presentation Layer
+                    st.success(f"### 🏁 Final Verdict: {verdict}")
+                    
+                    m_col1, m_col2 = st.columns(2)
+                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
+                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
+                    st.markdown("---")
+                    
+                    # Directly inject the clean, structured levels table and brief notes
+                    st.markdown(clear_markdown_body)
                         
                 except Exception as e:
                     st.error(f"An error occurred during processing: {str(e)}")
