@@ -21,10 +21,10 @@ st.markdown("---")
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
 
-# Fallback UI if Secrets are not configured yet
+# Fallback text box if Secrets aren't configured yet
 api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
 
-# Use current generation production-ready models
+# Production-ready standard model
 model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
 st.sidebar.markdown("""
@@ -96,14 +96,14 @@ with col1:
     if ticker_name:
         with st.spinner(f"Fetching chart for {ticker_name}..."):
             try:
-                # 1. Download market engine data
+                # 1. Download market data
                 stock = yf.Ticker(ticker_name)
                 df = stock.history(period=time_period, interval=time_interval)
                 
                 if df.empty:
                     st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
                 else:
-                    # 2. Plot clean chart inside memory buffer using a safe, universal visual style ('yahoo')
+                    # 2. Plot clean chart inside memory buffer using a universally stable style
                     buf = io.BytesIO()
                     
                     custom_style = mpf.make_mpf_style(
@@ -122,7 +122,7 @@ with col1:
                     )
                     buf.seek(0)
                     
-                    # 3. Load processed output to page layout view
+                    # 3. Load processed output to UI view
                     chart_image = Image.open(buf)
                     st.image(chart_image, caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
                     
@@ -132,7 +132,7 @@ with col1:
 with col2:
     st.subheader("⚡ Automated Institutional Report")
     
-    # Checks Streamlit secrets panel automatically, defaults back to the manual sidebar text box if missing.
+    # Checks Streamlit secrets panel automatically, falls back to the sidebar if empty
     final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
     
     if st.button("Run Smart Money Analysis", type="primary"):
@@ -141,12 +141,12 @@ with col2:
         elif chart_image is None:
             st.error("❌ There is no generated stock chart to analyze yet.")
         else:
-            with st.spinner(f"Analyzing institutional footprints for {ticker_name}..."):
+            with st.spinner(f"Analyzing footprints for {ticker_name}..."):
                 try:
-                    # Connect via the current generation client standard
+                    # Connect via the generation client standard
                     client = genai.Client(api_key=final_api_key)
                     
-                    # Combine image content and system structure parameters
+                    # Combine image content and system prompt parameters
                     content_payload = [
                         chart_image,
                         f"Analyze this auto-generated chart for ticker: {ticker_name}.\n" + INSTITUTIONAL_PROMPT
@@ -161,4 +161,4 @@ with col2:
                     st.success("✅ Analysis Complete!")
                     
                 except Exception as e:
-                    st.error(f"An error
+                    st.error(f"An error occurred during processing: {str(e)}")
