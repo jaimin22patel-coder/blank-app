@@ -15,7 +15,7 @@ st.set_page_config(
 
 # Application Header
 st.title("📊 Auto-Institutional Price Action Stock Analyzer")
-st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute Smart Money analysis.")
+st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute individual data tracking.")
 st.markdown("---")
 
 # Sidebar Configuration
@@ -29,30 +29,26 @@ Add `.NS` for NSE stocks or `.BO` for BSE stocks.
 * *Example:* `RELIANCE.NS`, `SBIN.NS`.
 """)
 
-# Strictly engineered prompt forcing a standardized Markdown Table layout
+# Strictly engineered prompt forcing the new level-first 3rd column table layout
 INSTITUTIONAL_PROMPT = """
 You are an Institutional Price Action Analyst specializing in smart money concepts. 
-Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
+Analyze the provided chart and track each of the following 9 concepts individually. 
 
-You must present your core findings strictly using this exact structural layout:
+You must present your core findings strictly using a clean markdown table matching these exact column headers:
+| Setup / Concept | Status | Precise Price / Level | Individual Data Points & Reasons Used to Track This |
 
-VERDICT: [Insert only one: Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
-BULLISH_SCORE: [Number 0-100]
-BEARISH_SCORE: [Number 0-100]
+Inside the table, evaluate these 9 items row-by-row in this exact order:
+1. Market structure (Identify if it is Bullish Shift, Bearish Shift, or Ranging based on structural swing points)
+2. Breakout (Identify if there is an active/confirmed breakout past key horizontal resistance based on candle body closes and volume)
+3. Breakdown (Identify if there is an active/confirmed breakdown below key horizontal support based on candle body closes and volume)
+4. Retest (Identify if price has pulled back to a previously broken level and paused/held)
+5. Price hold (Identify if price is consolidating tightly or forming inside bars inside a specific demand/supply area)
+6. Price rejection (Identify if price left long upper/lower wicks or pin bars to sweep liquidity and snap back)
+7. Stop loss (Provide a precise protective stop-loss level located directly beneath the invalidation structure)
+8. Entry point near stop loss (Identify an optimal entry level positioned tightly near the protective stop loss to keep risk low)
+9. Risk reward is >= 1:1.5 (Calculate and confirm if the potential reward relative to the stop-loss risk meets or exceeds a 1:1.5 ratio)
 
-### 🎯 Institutional Key Levels Board
-Create a clean markdown table matching these exact column headers:
-| Price Level / Range | Zone Type | Institutional Action / Reason (One Sentence) |
-
-Inside the table, make sure to map out:
-1. Fresh Demand / Accumulation Zone
-2. Fresh Supply / Distribution Zone
-3. Buy Trigger / Liquidity Sweep Level
-4. Invalidation Level (Stop Loss)
-5. Major Liquidity Target (Take Profit)
-
-### 🧭 Market Context Notes
-- Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
+Do not include any conversational intro, extra text summaries, or generic explanations. Output only the markdown table.
 """
 
 # Layout Split: Left for data inputs, Right for AI analysis output
@@ -92,50 +88,24 @@ with col1:
                 st.error(f"Failed to fetch market data: {str(e)}")
 
 with col2:
-    st.subheader("⚡ Automated Institutional Report")
+    st.subheader("📊 Individual Price Action Data Tracker")
     final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
     
-    if st.button("Run Smart Money Analysis", type="primary"):
+    if st.button("Track Individual Setup Data", type="primary"):
         if not final_api_key:
             st.error("❌ Please configure your Gemini API Key.")
         elif chart_image is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
-            with st.spinner(f"Parsing institutional footprints for {ticker_name}..."):
+            with st.spinner(f"Tracking separate price action footprints for {ticker_name}..."):
                 try:
                     client = genai.Client(api_key=final_api_key)
                     content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
                     response = client.models.generate_content(model=model_choice, contents=content_payload)
-                    raw_text = response.text
                     
-                    # Core variables parsing engine
-                    verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
-                    
-                    lines = raw_text.split("\n")
-                    remaining_lines = []
-                    
-                    for line in lines:
-                        if line.startswith("VERDICT:"): 
-                            verdict = line.replace("VERDICT:", "").strip()
-                        elif line.startswith("BULLISH_SCORE:"): 
-                            bullish = line.replace("BULLISH_SCORE:", "").strip()
-                        elif line.startswith("BEARISH_SCORE:"): 
-                            bearish = line.replace("BEARISH_SCORE:", "").strip()
-                        else:
-                            remaining_lines.append(line)
-                            
-                    clear_markdown_body = "\n".join(remaining_lines).strip()
-                    
-                    # UI Presentation Layer
-                    st.success(f"### 🏁 Final Verdict: {verdict}")
-                    
-                    m_col1, m_col2 = st.columns(2)
-                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
-                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
-                    st.markdown("---")
-                    
-                    # Directly inject the clean, structured levels table and brief notes
-                    st.markdown(clear_markdown_body)
+                    # Directly display the strict layout table response on the dashboard
+                    st.markdown(response.text)
+                    st.success("✅ Tracking Data Updated!")
                         
                 except Exception as e:
                     st.error(f"An error occurred during processing: {str(e)}")
