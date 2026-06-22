@@ -20,63 +20,36 @@ st.markdown("---")
 
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
-
-# Fallback text box if Secrets aren't configured yet
 api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
-
-# Production-ready standard model
 model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
 st.sidebar.markdown("""
 ### Indian Market Format:
 Add `.NS` for NSE stocks or `.BO` for BSE stocks.
-* *Example:* `RELIANCE.NS`, `TATASTEEL.NS`, `NIFTY=F` (Nifty Futures).
+* *Example:* `RELIANCE.NS`, `TATASTEEL.NS`.
 """)
 
-# Core Institutional Prompt Framework
+# Optimized prompt forcing the AI to strictly output key-value data for extraction
 INSTITUTIONAL_PROMPT = """
-You are an Institutional Price Action Analyst specializing in the Indian stock market.
-Analyze the provided chart exactly as a professional trader at a hedge fund, proprietary trading firm, or institutional desk would.
+You are an Institutional Price Action Analyst. Analyze the provided chart exactly as a professional smart money trader would. Do NOT use indicator signals.
 
-Do NOT use RSI, MACD, Moving Averages, Supertrend, Bollinger Bands, Ichimoku, or any indicator-based signals.
-Base the analysis strictly on Price Action, Market Structure, Supply/Demand, and Liquidity.
+Provide your output in this EXACT format so the system can parse it cleanly:
 
-Provide your output using clean, bold headers, bullet points, and markdown tables where appropriate. Break your analysis down exactly into these sections:
+VERDICT: [Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
+BULLISH_SCORE: [Number 0-100]
+BEARISH_SCORE: [Number 0-100]
 
-## 🧭 1. Think Like Smart Money
-- Where are retail traders likely buying/selling?
-- Where are stop losses clustered & where is liquidity resting?
-- Did price sweep liquidity before moving?
-- Is the move likely accumulation, distribution, markup, or markdown?
-- Is the current move sponsored by institutions or driven by retail emotion?
+---SUMMARY---
+[Provide a short, 2-sentence summary here]
 
-## 📉 2. Market Structure Analysis
-- **HH/HL/LH/LL Status:**
-- **Classification:** (Strong Uptrend / Uptrend / Range / Downtrend / Strong Downtrend)
-- **Structure State:** (Intact / Weakening / Broken)
+---SMART_MONEY---
+[Provide 3-4 bullet points analyzing stop-loss clusters, retail traps, and liquidity sweeps here]
 
-## 🎯 3. Institutional Supply & Demand Zones
-Create a table listing: Zone Type (Demand/Supply), Status (Fresh/Tested), Strength (Strong/Moderate/Weak), and why institutions may defend it.
+---STRUCTURE---
+[Provide 2-3 bullet points analyzing structural HH/HL context here]
 
-## 💧 4. Liquidity & Breakout Quality Analysis
-- **Liquidity Targets:** Where is smart money heading next?
-- **Breakout/Retest Classification:** (Institutional Breakout / Retail Breakout / False Breakout / Liquidity Grab)
-- Was there strong displacement and follow-through? What is the Candle Story?
-
-## 📊 5. Institutional Bias Score
-- **Bullish Score:** [0-100]
-- **Bearish Score:** [0-100]
-*(Base this on Structure, Liquidity, Supply/Demand, and Breakout Quality)*
-
-## 📝 6. Trade Plan (If setup exists)
-- **Entry Zone:** (Where institutions are likely accumulating/distributing)
-- **Invalidation Level (Stop Loss):**
-- **Targets:** Target 1 & Target 2
-- **Risk to Reward Ratio:**
-
-## 🏁 7. Final Verdict
-**[INSERT ONE: Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]**
-*Provide a 2-3 sentence explanation of the reasoning in simple language.*
+---TRADE_PLAN---
+[Provide Entry Zone, Invalidation SL, and Targets here as bullet points]
 """
 
 # Layout Split: Left for data inputs, Right for AI analysis output
@@ -85,80 +58,85 @@ col1, col2 = st.columns([1, 1.2])
 with col1:
     st.subheader("🔍 Fetch Chart Data")
     ticker_name = st.text_input("Stock Ticker Symbol", placeholder="e.g., RELIANCE.NS").strip().upper()
-    
-    # Structure setup selectors
     time_period = st.selectbox("Select History Lookback", ["3mo", "6mo", "1y", "2y"], index=1)
     time_interval = st.selectbox("Candle Timeframe", ["1d", "1wk"], index=0)
 
-    # Empty canvas initialization for chart memory stream
     chart_image = None
 
     if ticker_name:
         with st.spinner(f"Fetching chart for {ticker_name}..."):
             try:
-                # 1. Download market data
                 stock = yf.Ticker(ticker_name)
                 df = stock.history(period=time_period, interval=time_interval)
                 
                 if df.empty:
                     st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
                 else:
-                    # 2. Plot clean chart inside memory buffer using a universally stable style
                     buf = io.BytesIO()
-                    
                     custom_style = mpf.make_mpf_style(
                         base_mpf_style='yahoo', 
                         marketcolors=mpf.make_marketcolors(up='green', down='red', inherit=True)
                     )
-                    
                     mpf.plot(
-                        df, 
-                        type='candle', 
-                        style=custom_style, 
-                        volume=True, 
+                        df, type='candle', style=custom_style, volume=True, 
                         title=f"\n{ticker_name} Clean Structure Chart ({time_interval})",
-                        savefig=dict(fname=buf, dpi=150, bbox_inches='tight'),
-                        figscale=1.1
+                        savefig=dict(fname=buf, dpi=150, bbox_inches='tight'), figscale=1.1
                     )
                     buf.seek(0)
-                    
-                    # 3. Load processed output to UI view
                     chart_image = Image.open(buf)
                     st.image(chart_image, caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
-                    
             except Exception as e:
-                st.error(f"Failed to fetch or render market data: {str(e)}")
+                st.error(f"Failed to fetch market data: {str(e)}")
 
 with col2:
     st.subheader("⚡ Automated Institutional Report")
-    
-    # Checks Streamlit secrets panel automatically, falls back to the sidebar if empty
     final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
     
     if st.button("Run Smart Money Analysis", type="primary"):
         if not final_api_key:
-            st.error("❌ Please enter your Gemini API Key in the sidebar or save it in Streamlit Secrets.")
+            st.error("❌ Please configure your Gemini API Key.")
         elif chart_image is None:
-            st.error("❌ There is no generated stock chart to analyze yet.")
+            st.error("❌ No generated stock chart to analyze.")
         else:
             with st.spinner(f"Analyzing footprints for {ticker_name}..."):
                 try:
-                    # Connect via the generation client standard
                     client = genai.Client(api_key=final_api_key)
+                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
+                    response = client.models.generate_content(model=model_choice, contents=content_payload)
+                    raw_text = response.text
                     
-                    # Combine image content and system prompt parameters
-                    content_payload = [
-                        chart_image,
-                        f"Analyze this auto-generated chart for ticker: {ticker_name}.\n" + INSTITUTIONAL_PROMPT
-                    ]
+                    # Parsing core metrics out of raw AI text to map cleanly to dashboard elements
+                    verdict, bullish, bearish, summary, smart_money, structure, trade_plan = "N/A", "0", "0", "", "", "", ""
+                    try:
+                        for line in raw_text.split("\n"):
+                            if line.startswith("VERDICT:"): verdict = line.replace("VERDICT:", "").strip()
+                            if line.startswith("BULLISH_SCORE:"): bullish = line.replace("BULLISH_SCORE:", "").strip()
+                            if line.startswith("BEARISH_SCORE:"): bearish = line.replace("BEARISH_SCORE:", "").strip()
+                        
+                        if "---SUMMARY---" in raw_text: summary = raw_text.split("---SUMMARY---")[1].split("---")[0].strip()
+                        if "---SMART_MONEY---" in raw_text: smart_money = raw_text.split("---SMART_MONEY---")[1].split("---")[0].strip()
+                        if "---STRUCTURE---" in raw_text: structure = raw_text.split("---STRUCTURE---")[1].split("---")[0].strip()
+                        if "---TRADE_PLAN---" in raw_text: trade_plan = raw_text.split("---TRADE_PLAN---")[1].strip()
+                    except:
+                        summary = raw_text # Fallback if text structural block changes slightly
                     
-                    response = client.models.generate_content(
-                        model=model_choice,
-                        contents=content_payload
-                    )
+                    # Display 1: Top-Level Clean KPI Scoreboards
+                    st.success(f"### 🏁 Verdict: {verdict}")
+                    m_col1, m_col2 = st.columns(2)
+                    m_col1.metric("🟢 Institutional Bullish Bias", f"{bullish}%")
+                    m_col2.metric("🔴 Institutional Bearish Bias", f"{bearish}%")
                     
-                    st.markdown(response.text)
-                    st.success("✅ Analysis Complete!")
+                    st.markdown(f"**Quick Take:** {summary}")
+                    st.markdown("---")
                     
+                    # Display 2: Organized Mobile Toggles
+                    t1, t2, t3 = st.tabs(["💧 Smart Money & Liquidity", "📉 Structure State", "📝 Trade Setup Plan"])
+                    with t1:
+                        st.markdown(smart_money if smart_money else "No data returned.")
+                    with t2:
+                        st.markdown(structure if structure else "No data returned.")
+                    with t3:
+                        st.markdown(trade_plan if trade_plan else "No data returned.")
+                        
                 except Exception as e:
                     st.error(f"An error occurred during processing: {str(e)}")
