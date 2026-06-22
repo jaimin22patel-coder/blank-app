@@ -26,30 +26,33 @@ model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini
 st.sidebar.markdown("""
 ### Indian Market Format:
 Add `.NS` for NSE stocks or `.BO` for BSE stocks.
-* *Example:* `RELIANCE.NS`, `TATASTEEL.NS`.
+* *Example:* `RELIANCE.NS`, `SBIN.NS`.
 """)
 
-# Optimized prompt forcing the AI to strictly output key-value data for extraction
+# Strictly engineered prompt forcing a standardized Markdown Table layout
 INSTITUTIONAL_PROMPT = """
-You are an Institutional Price Action Analyst. Analyze the provided chart exactly as a professional smart money trader would. Do NOT use indicator signals.
+You are an Institutional Price Action Analyst specializing in smart money concepts. 
+Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
 
-Provide your output in this EXACT format so the system can parse it cleanly:
+You must present your core findings strictly using this exact structural layout:
 
-VERDICT: [Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
+VERDICT: [Insert only one: Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
 BULLISH_SCORE: [Number 0-100]
 BEARISH_SCORE: [Number 0-100]
 
----SUMMARY---
-[Provide a short, 2-sentence summary here]
+### 🎯 Institutional Key Levels Board
+Create a clean markdown table matching these exact column headers:
+| Price Level / Range | Zone Type | Institutional Action / Reason (One Sentence) |
 
----SMART_MONEY---
-[Provide 3-4 bullet points analyzing stop-loss clusters, retail traps, and liquidity sweeps here]
+Inside the table, make sure to map out:
+1. Fresh Demand / Accumulation Zone
+2. Fresh Supply / Distribution Zone
+3. Buy Trigger / Liquidity Sweep Level
+4. Invalidation Level (Stop Loss)
+5. Major Liquidity Target (Take Profit)
 
----STRUCTURE---
-[Provide 2-3 bullet points analyzing structural HH/HL context here]
-
----TRADE_PLAN---
-[Provide Entry Zone, Invalidation SL, and Targets here as bullet points]
+### 🧭 Market Context Notes
+- Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
 """
 
 # Layout Split: Left for data inputs, Right for AI analysis output
@@ -98,45 +101,41 @@ with col2:
         elif chart_image is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
-            with st.spinner(f"Analyzing footprints for {ticker_name}..."):
+            with st.spinner(f"Parsing institutional footprints for {ticker_name}..."):
                 try:
                     client = genai.Client(api_key=final_api_key)
                     content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
                     response = client.models.generate_content(model=model_choice, contents=content_payload)
                     raw_text = response.text
                     
-                    # Parsing core metrics out of raw AI text to map cleanly to dashboard elements
-                    verdict, bullish, bearish, summary, smart_money, structure, trade_plan = "N/A", "0", "0", "", "", "", ""
-                    try:
-                        for line in raw_text.split("\n"):
-                            if line.startswith("VERDICT:"): verdict = line.replace("VERDICT:", "").strip()
-                            if line.startswith("BULLISH_SCORE:"): bullish = line.replace("BULLISH_SCORE:", "").strip()
-                            if line.startswith("BEARISH_SCORE:"): bearish = line.replace("BEARISH_SCORE:", "").strip()
-                        
-                        if "---SUMMARY---" in raw_text: summary = raw_text.split("---SUMMARY---")[1].split("---")[0].strip()
-                        if "---SMART_MONEY---" in raw_text: smart_money = raw_text.split("---SMART_MONEY---")[1].split("---")[0].strip()
-                        if "---STRUCTURE---" in raw_text: structure = raw_text.split("---STRUCTURE---")[1].split("---")[0].strip()
-                        if "---TRADE_PLAN---" in raw_text: trade_plan = raw_text.split("---TRADE_PLAN---")[1].strip()
-                    except:
-                        summary = raw_text # Fallback if text structural block changes slightly
+                    # Core variables parsing engine
+                    verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
                     
-                    # Display 1: Top-Level Clean KPI Scoreboards
-                    st.success(f"### 🏁 Verdict: {verdict}")
+                    lines = raw_text.split("\n")
+                    remaining_lines = []
+                    
+                    for line in lines:
+                        if line.startswith("VERDICT:"): 
+                            verdict = line.replace("VERDICT:", "").strip()
+                        elif line.startswith("BULLISH_SCORE:"): 
+                            bullish = line.replace("BULLISH_SCORE:", "").strip()
+                        elif line.startswith("BEARISH_SCORE:"): 
+                            bearish = line.replace("BEARISH_SCORE:", "").strip()
+                        else:
+                            remaining_lines.append(line)
+                            
+                    clear_markdown_body = "\n".join(remaining_lines).strip()
+                    
+                    # UI Presentation Layer
+                    st.success(f"### 🏁 Final Verdict: {verdict}")
+                    
                     m_col1, m_col2 = st.columns(2)
-                    m_col1.metric("🟢 Institutional Bullish Bias", f"{bullish}%")
-                    m_col2.metric("🔴 Institutional Bearish Bias", f"{bearish}%")
-                    
-                    st.markdown(f"**Quick Take:** {summary}")
+                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
+                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
                     st.markdown("---")
                     
-                    # Display 2: Organized Mobile Toggles
-                    t1, t2, t3 = st.tabs(["💧 Smart Money & Liquidity", "📉 Structure State", "📝 Trade Setup Plan"])
-                    with t1:
-                        st.markdown(smart_money if smart_money else "No data returned.")
-                    with t2:
-                        st.markdown(structure if structure else "No data returned.")
-                    with t3:
-                        st.markdown(trade_plan if trade_plan else "No data returned.")
+                    # Directly inject the clean, structured levels table and brief notes
+                    st.markdown(clear_markdown_body)
                         
                 except Exception as e:
                     st.error(f"An error occurred during processing: {str(e)}")
