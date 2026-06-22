@@ -20,7 +20,9 @@ st.markdown("---")
 
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
-api_key = st.sidebar.text_input("Enter Gemini API Key", type="password")
+
+# Fallback UI if Secrets are not configured yet
+api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
 
 # Use current generation production-ready models
 model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
@@ -101,7 +103,7 @@ with col1:
                 if df.empty:
                     st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
                 else:
-                    # 2. Plot clean chart inside memory buffer using a safe, universal visual style
+                    # 2. Plot clean chart inside memory buffer using a safe, universal visual style ('yahoo')
                     buf = io.BytesIO()
                     
                     custom_style = mpf.make_mpf_style(
@@ -130,16 +132,19 @@ with col1:
 with col2:
     st.subheader("⚡ Automated Institutional Report")
     
+    # Checks Streamlit secrets panel automatically, defaults back to the manual sidebar text box if missing.
+    final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
+    
     if st.button("Run Smart Money Analysis", type="primary"):
-        if not api_key:
-            st.error("❌ Please enter your Gemini API Key in the sidebar.")
+        if not final_api_key:
+            st.error("❌ Please enter your Gemini API Key in the sidebar or save it in Streamlit Secrets.")
         elif chart_image is None:
             st.error("❌ There is no generated stock chart to analyze yet.")
         else:
             with st.spinner(f"Analyzing institutional footprints for {ticker_name}..."):
                 try:
                     # Connect via the current generation client standard
-                    client = genai.Client(api_key=api_key)
+                    client = genai.Client(api_key=final_api_key)
                     
                     # Combine image content and system structure parameters
                     content_payload = [
@@ -156,4 +161,4 @@ with col2:
                     st.success("✅ Analysis Complete!")
                     
                 except Exception as e:
-                    st.error(f"An error occurred during processing: {str(e)}")
+                    st.error(f"An error
