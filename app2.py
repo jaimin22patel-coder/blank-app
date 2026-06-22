@@ -298,8 +298,7 @@ if ticker:
                         desk_msg = f"❌ Trade Aborted: Target 1 (₹{target_1}) runs directly into 2-Year Weekly Macro Ceiling (₹{w_r_bottom}). Range capped."
 
             # --- UI PRESENTATION GRID ---
-            layout_col1, layout_col2 = st.columns(2)
-            
+            layout_col1, layout_col2 = st.columns(2)             
            with layout_col1:
                 st.subheader("1. Sequential Market Structure Shifts (MSS)")
                 st.info(mss_msg)
