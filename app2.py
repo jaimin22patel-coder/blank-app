@@ -300,7 +300,7 @@ if ticker:
             # --- UI PRESENTATION GRID ---
             layout_col1, layout_col2 = st.columns(2)
             
-            with layout_col1:
+           with layout_col1:
                 st.subheader("1. Sequential Market Structure Shifts (MSS)")
                 st.info(mss_msg)
                 
@@ -310,13 +310,15 @@ if ticker:
                         st.markdown(f"**Execution Action:** `{MSS_HELP[mss_msg]['action']}`")
                 
                 st.subheader("2. Key Daily Structural Zones (3-4 Month Profile)")
-                st.success(f"🟢 **Institutional Demand Zone:** ₹{d_s_bottom} - ₹{d_s_top}  \n*(Valid Touches: {d_s_hits} | Current Squeeze Contact Count: {floor_strikes})*")
-                st.error(f"🔴 **Institutional Supply Zone:** ₹{d_r_bottom} - ₹{d_r_top}  \n*(Valid Touches: {d_r_hits} | Current Squeeze Contact Count: {ceiling_strikes})*")
+                # FIXED: Added clean rounding to 2 decimal places for Daily Zones
+                st.success(f"🟢 **Institutional Demand Zone:** ₹{round(d_s_bottom, 2)} - ₹{round(d_s_top, 2)}  \n*(Valid Touches: {d_s_hits} | Current Squeeze Contact Count: {floor_strikes})*")
+                st.error(f"🔴 **Institutional Supply Zone:** ₹{round(d_r_bottom, 2)} - ₹{round(d_r_top, 2)}  \n*(Valid Touches: {d_r_hits} | Current Squeeze Contact Count: {ceiling_strikes})*")
                 
                 st.subheader("3. Key Weekly Macro Zones (1-2 Year Frame)")
-                st.markdown(f"**🔷 Weekly Macro Floor:** ₹{w_s_bottom} - ₹{w_s_top} *(Historical Weight: {w_s_hits} hits)*")
-                st.markdown(f"**🔶 Weekly Macro Ceiling:** ₹{w_r_bottom} - ₹{w_r_top} *(Historical Weight: {w_r_hits} hits)*")
-
+                # FIXED: Added clean rounding to 2 decimal places for Weekly Zones
+                st.markdown(f"**🔷 Weekly Macro Floor:** ₹{round(w_s_bottom, 2)} - ₹{round(w_s_top, 2)} *(Historical Weight: {w_s_hits} hits)*")
+                st.markdown(f"**🔶 Weekly Macro Ceiling:** ₹{round(w_r_bottom, 2)} - ₹{round(w_r_top, 2)} *(Historical Weight: {w_r_hits} hits)*")
+               
             with layout_col2:
                 st.subheader("4. Breakout & Breakdown Analytics")
                 st.write(breakout_status)
