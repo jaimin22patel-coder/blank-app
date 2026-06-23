@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from tvdatafeed import TvDatafeed, Interval
+from tvDatafeed import TvDatafeed, Interval
 
 # Initialize TradingView Datafeed
 @st.cache_resource
