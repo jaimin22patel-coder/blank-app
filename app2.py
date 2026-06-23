@@ -101,7 +101,7 @@ with col2:
                 try:
                     base64_image = encode_image_to_base64(chart_image)
                     
-                    # Using the free Hugging Face Serverless API architecture
+                    # Core Hugging Face Serverless endpoint path
                     API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-VL-7B-Instruct"
                     headers = {"Authorization": f"Bearer {final_token}"}
                     
@@ -122,7 +122,12 @@ with col2:
                     response = requests.post(API_URL, headers=headers, json=payload)
                     res_json = response.json()
                     
-                    raw_text = res_json['choices'][0]['message']['content']
+                    if 'choices' in res_json:
+                        raw_text = res_json['choices'][0]['message']['content']
+                    elif 'error' in res_json:
+                        raise Exception(res_json['error'])
+                    else:
+                        raw_text = str(res_json)
                     
                     # Parsing metrics engine
                     verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
