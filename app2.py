@@ -1,143 +1,161 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-import urllib.request
-import json
-from datetime import datetime, timedelta
+import numpy as np
+from tvdatafeed import TvDatafeed, Interval
 
-st.set_page_config(layout="wide")
-st.title("🇮🇳 Institutional Price Action Tool")
+# Initialize TradingView Datafeed
+@st.cache_resource
+def init_tv():
+    # Anonymous login; replace with username/password if you have a premium TV account
+    return TvDatafeed()
 
-# ==========================================
-# SIDEBAR CONFIGURATION
-# ==========================================
-st.sidebar.header("Tool Configurations")
-ticker = st.sidebar.text_input("Stock Ticker (e.g. RELIANCE, TCS, SBIN)", value="RELIANCE").upper().strip()
-timeframe = st.sidebar.selectbox("Select Timeframe", options=["Daily", "Weekly"], index=0)
-volume_multiplier = st.sidebar.slider("Volume Breakout Multiplier", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
+tv = init_tv()
 
-@st.cache_data(ttl=600)
-def fetch_nse_data(symbol):
+# --- 1. UI INPUT & CONFIGURATION ---
+st.title("🇮🇳 Indian Stock Price Action Analysis Tool")
+st.sidebar.header("Control Panel")
+
+# Timeframe Dropdown
+tf_choice = st.sidebar.selectbox(
+    "Select Timeframe",
+    options=["1m", "5m", "15m", "1H", "4H", "1D"],
+    index=3 # Default to 1H
+)
+
+# Map UI selection to TradingView intervals
+tf_map = {
+    "1m": Interval.in_1minute,
+    "5m": Interval.in_5minute,
+    "15m": Interval.in_15minute,
+    "1H": Interval.in_1hour,
+    "4H": Interval.in_4hour,
+    "1D": Interval.in_daily
+}
+
+# Lookback Period Dropdown (Translated to number of candles to fetch)
+lookback_choice = st.sidebar.selectbox(
+    "Select Lookback Period",
+    options=["50 Candles", "100 Candles", "250 Candles", "500 Candles"],
+    index=2 # Default to 250
+)
+n_candles = int(lookback_choice.split()[0])
+
+# Stock Symbol Input
+symbol = st.sidebar.text_input("Enter NSE Stock Symbol (e.g., RELIANCE, SBIN)", value="RELIANCE").upper()
+
+# --- DATA FETCHING ---
+@st.cache_data(ttl=60) # Cache for 1 minute to prevent constant API spamming
+def load_data(sym, tf, length):
     try:
-        url = f"https://query1.financeapi.com/v8/finance/chart/{symbol}.NS?range=1y&interval=1d"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode())
-        
-        result = data['chart']['result'][0]
-        timestamps = result['timestamp']
-        indicators = result['indicators']['quote'][0]
-        
-        df = pd.DataFrame({
-            'Open': indicators['open'],
-            'High': indicators['high'],
-            'Low': indicators['low'],
-            'Close': indicators['close'],
-            'Volume': indicators['volume']
-        }, index=pd.to_datetime(timestamps, unit='s'))
-        return df.dropna()
-    except:
-        # FAILSAFE: Generate clean dummy data so the chart framework never crashes
-        base_date = datetime.now() - timedelta(days=100)
-        dates = [base_date + timedelta(days=i) for i in range(100)]
-        prices = [2500 + (i * 2 if i < 50 else -((i-50) * 3)) for i in range(100)]
-        
-        df = pd.DataFrame({
-            'Open': [p - 5 for p in prices],
-            'High': [p + 15 for p in prices],
-            'Low': [p - 12 for p in prices],
-            'Close': prices,
-            'Volume': [1000000 + (i * 5000) for i in range(100)]
-        }, index=pd.to_datetime(dates))
-        return df
+        df = tv.get_hist(symbol=sym, exchange='NSE', interval=tf_map[tf], n_bars=length)
+        if df is not None and not df.empty:
+            df = df.reset_index()
+            # Ensure standard column names
+            df.columns = [c.lower() for c in df.columns]
+            return df
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
+    return None
 
-df = fetch_nse_data(ticker)
+df = load_data(symbol, tf_choice, n_candles)
 
-if timeframe == "Weekly":
-    df = df.resample('W').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
+if df is not None:
+    cmp = df['close'].iloc[-1]
+    st.metric(label=f"Current Market Price (CMP) - NSE:{symbol}", value=f"₹{cmp:.2f}")
 
-# ==========================================
-# 1. MARKET STRUCTURE ANALYSIS
-# ==========================================
-window = 3
-df['Swing_High'] = df['High'][(df['High'] == df['High'].rolling(window=window*2+1, center=True).max())]
-df['Swing_Low'] = df['Low'][(df['Low'] == df['Low'].rolling(window=window*2+1, center=True).min())]
+    # --- 2. LOGIC: SWING HIGHS & LOWS (Market Structure) ---
+    window = 5
+    df['is_high'] = (df['high'] == df['high'].rolling(window=window*2+1, center=True).max())
+    df['is_low'] = (df['low'] == df['low'].rolling(window=window*2+1, center=True).min())
 
-df['Last_SH'] = df['Swing_High'].ffill()
-df['Last_SL'] = df['Swing_Low'].ffill()
+    # --- 3. LOGIC: SUPPORT & RESISTANCE (Rule d: Chart-Based Proximity) ---
+    swing_highs = df[df['is_high']]['high'].tolist()
+    swing_lows = df[df['is_low']]['low'].tolist()
+    
+    # Chart-based boundary: Find the immediate closest structural points above and below CMP
+    upper_bounds = [h for h in swing_highs if h > cmp]
+    lower_bounds = [l for l in swing_lows if l < cmp]
+    
+    nearest_resistance_ceiling = min(upper_bounds) if upper_bounds else df['high'].max()
+    nearest_support_floor = max(lower_bounds) if lower_bounds else df['low'].min()
 
-current_close = df['Close'].iloc[-1]
-last_sh = df['Last_SH'].dropna().iloc[-1] if not df['Last_SH'].dropna().empty else float('inf')
-last_sl = df['Last_SL'].dropna().iloc[-1] if not df['Last_SL'].dropna().empty else float('-inf')
+    # Filter all historical levels to strictly fit within our chart room boundaries (Rule D)
+    valid_resistances = [h for h in swing_highs if cmp < h <= nearest_resistance_ceiling]
+    valid_supports = [l for l in swing_lows if nearest_support_floor <= l < cmp]
 
-structure_trend = "Sideways"
-if current_close > last_sh:
-    structure_trend = "Bullish (MSS)"
-elif current_close < last_sl:
-    structure_trend = "Bearish (MSS)"
+    # --- 4. LOGIC: CANDLESTICK PATTERNS ---
+    # Helper to calculate candle dimensions
+    body = (df['close'] - df['open']).abs()
+    candle_range = df['high'] - df['low']
+    upper_wick = df['high'] - df[['open', 'close']].max(axis=1)
+    lower_wick = df[['open', 'close']].min(axis=1) - df['low']
+    
+    # Identify Hammer & Shooting Star
+    df['hammer'] = (lower_wick > (2 * body)) & (upper_wick < (0.2 * candle_range)) & (body > 0)
+    df['shooting_star'] = (upper_wick > (2 * body)) & (lower_wick < (0.2 * candle_range)) & (body > 0)
+    
+    # Identify Engulfing Patterns
+    df['bullish_engulfing'] = (df['close'].shift(1) < df['open'].shift(1)) & \
+                              (df['close'] > df['open']) & \
+                              (df['close'] >= df['open'].shift(1)) & \
+                              (df['open'] <= df['close'].shift(1))
+                              
+    df['bearish_engulfing'] = (df['close'].shift(1) > df['open'].shift(1)) & \
+                              (df['close'] < df['open']) & \
+                              (df['close'] <= df['open'].shift(1)) & \
+                              (df['open'] >= df['close'].shift(1))
 
-# ==========================================
-# 2. SUPPORT & RESISTANCE (Rule A, B, C, D)
-# ==========================================
-all_levels = pd.concat([df['Swing_High'].dropna(), df['Swing_Low'].dropna()]).tolist()
+    # --- 5. LOGIC: BREAKOUT / BREAKDOWN WITH VOLUME ---
+    vol_ma = df['volume'].rolling(window=20).mean()
+    df['high_vol'] = df['volume'] > (1.5 * vol_ma) # 1.5x average volume
+    
+    # Check last few bars for breakout/breakdown
+    latest_bar = df.iloc[-1]
+    prev_bar = df.iloc[-2]
+    
+    breakout_triggered = prev_bar['close'] > nearest_resistance_ceiling and prev_bar['high_vol']
+    breakdown_triggered = prev_bar['close'] < nearest_support_floor and prev_bar['high_vol']
 
-closest_sup = current_close * 0.95
-closest_res = current_close * 1.05
-min_sup_diff = float('inf')
-min_res_diff = float('inf')
+    # --- DISPLAY ANALYTICS RESULTS ---
+    
+    st.subheader("1. Market Structure & Trend")
+    # Quick simple trend logic based on last 2 structural points
+    last_highs = df[df['is_high']]['high'].tail(2).tolist()
+    if len(last_highs) == 2:
+        if last_highs[1] > last_highs[0]:
+            st.success("Structure: Bullish (Making Higher Highs)")
+        else:
+            st.color_picker("Structure: Bearish (Making Lower Highs)", "#FF4B4B")
+    else:
+        st.info("Structure: Consolidating / Insufficient structural pivots.")
 
-for level in all_levels:
-    if level < current_close and (current_close - level) < min_sup_diff:
-        min_sup_diff = current_close - level
-        closest_sup = level
-    elif level > current_close and (level - current_close) < min_res_diff:
-        min_res_diff = level - current_close
-        closest_res = level
+    st.subheader("2. Chart-Based Proximity Levels")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="Nearest Support Floor", value=f"₹{nearest_support_floor:.2f}")
+    with col2:
+        st.metric(label="Nearest Resistance Ceiling", value=f"₹{nearest_resistance_ceiling:.2f}")
 
-# ==========================================
-# 3. BREAKOUT OR BREAKDOWN
-# ==========================================
-df['Vol_MA'] = df['Volume'].rolling(window=20).mean()
-df['High_Vol'] = df['Volume'] > (df['Vol_MA'] * volume_multiplier)
+    st.subheader("3. Breakout & Volume Scan")
+    if breakout_triggered:
+        st.success(f"⚠️ BULLISH BREAKOUT CONFIRMED: Price broke above ₹{nearest_resistance_ceiling:.2f} with High Volume. Watch for a Retest.")
+    elif breakdown_triggered:
+        st.error(f"⚠️ BEARISH BREAKDOWN CONFIRMED: Price cracked below ₹{nearest_support_floor:.2f} with High Volume. Watch for a Retest.")
+    else:
+        st.write("No active structural breakouts matching volume parameters right now.")
 
-df['Breakout'] = (df['Close'] > closest_res) & df['High_Vol']
-df['Breakdown'] = (df['Close'] < closest_sup) & df['High_Vol']
+    st.subheader("4. Price Action Rejection / Hold Scan (Current Candles)")
+    patterns_found = []
+    if latest_bar['hammer']: patterns_found.append("🔨 Hammer Found (Potential Institutional Support Hold)")
+    if latest_bar['bullish_engulfing']: patterns_found.append("📈 Bullish Engulfing Pattern")
+    if latest_bar['shooting_star']: patterns_found.append("💫 Shooting Star Found (Potential Institutional Rejection)")
+    if latest_bar['bearish_engulfing']: patterns_found.append("📉 Bearish Engulfing Pattern")
+    
+    if patterns_found:
+        for p in patterns_found:
+            st.info(p)
+    else:
+        st.write("No institutional rejection patterns printing on the immediate candle.")
 
-# ==========================================
-# 4. PRICE REJECT CANDLESTICK PATTERNS
-# ==========================================
-body = (df['Close'] - df['Open']).abs()
-upper_shadow = df['High'] - df[['Open', 'Close']].max(axis=1)
-lower_shadow = df[['Open', 'Close']].min(axis=1) - df['Low']
-
-df['Hammer'] = (lower_shadow > (body * 2)) & (upper_shadow < (body * 0.5))
-df['Shooting_Star'] = (upper_shadow > (body * 2)) & (lower_shadow < (body * 0.5))
-
-# ==========================================
-# 5. CHART VISUALIZATION
-# ==========================================
-fig = go.Figure()
-
-fig.add_trace(go.Candlestick(
-    x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-    name="Price Action"
-))
-
-fig.add_shape(type="line", x0=df.index[0], y0=closest_res, x1=df.index[-1], y1=closest_res,
-              line=dict(color="Red", width=2, dash="dash"), name="Near Resistance")
-fig.add_shape(type="line", x0=df.index[0], y0=closest_sup, x1=df.index[-1], y1=closest_sup,
-              line=dict(color="Green", width=2, dash="dash"), name="Near Support")
-
-# Signals
-breakouts = df[df['Breakout']]
-if not breakouts.empty:
-    fig.add_trace(go.Scatter(x=breakouts.index, y=breakouts['Low'] * 0.99, mode='markers',
-                             marker=dict(symbol='triangle-up', size=14, color='lime'), name='Breakout'))
-
-breakdowns = df[df['Breakdown']]
-if not breakdowns.empty:
-    fig.add_trace(go.Scatter(x=breakdowns.index, y=breakdowns['High'] * 1.01, mode='markers',
-                             marker=dict(symbol='triangle-down', size=14, color='red'), name='Breakdown'))
-
-st.plotly_chart(fig, use_container_width=True)
-st.success(f"Framework successfully generated! Active Trend State: {structure_trend}")
+else:
+    st.warning("Please enter a valid NSE stock ticker and ensure you have internet connectivity to load TradingView charts.")
