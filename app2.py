@@ -14,13 +14,19 @@ st.set_page_config(
 )
 
 st.title("📊 Auto-Institutional Price Action Stock Analyzer")
-st.caption("Smart Money analysis with automated multi-key rate limit protection.")
+st.caption("Smart Money analysis with automated error-handling and local cache optimization.")
 st.markdown("---")
 
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
-api_key = st.sidebar.text_input("Manual Backup Key (Optional)", type="password")
+api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
 model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
+
+st.sidebar.markdown("""
+### Indian Market Format:
+Add `.NS` for NSE stocks or `.BO` for BSE stocks.
+* *Example:* `RELIANCE.NS`, `SBIN.NS`.
+""")
 
 # Core Prompt Framework
 INSTITUTIONAL_PROMPT = """
@@ -43,6 +49,18 @@ Inside the table, map out Demand/Supply zones, Breakout Triggers, Stop Loss, and
 - Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
 """
 
+# CACHED ENGINE: Saves your API quota so repeated clicks don't break your tool
+@st.cache_data(show_spinner=False)
+def get_cached_analysis(chart_bytes, ticker, model, target_prompt, secret_key):
+    try:
+        img = Image.open(io.BytesIO(chart_bytes))
+        client = genai.Client(api_key=secret_key)
+        content_payload = [img, f"Ticker: {ticker}\n" + target_prompt]
+        response = client.models.generate_content(model=model, contents=content_payload)
+        return response.text
+    except Exception as api_err:
+        return f"ERROR_OCCURRED: {str(api_err)}"
+
 # Layout Split
 col1, col2 = st.columns([1, 1.2])
 
@@ -53,6 +71,7 @@ with col1:
     time_interval = st.selectbox("Candle Timeframe", ["1d", "1wk"], index=0)
 
     chart_image = None
+    chart_bytes_for_cache = None
 
     if ticker_name:
         with st.spinner(f"Fetching chart for {ticker_name}..."):
@@ -70,6 +89,8 @@ with col1:
                     )
                     mpf.plot(df, type='candle', style=custom_style, volume=True, savefig=dict(fname=buf, dpi=150, bbox_inches='tight'), figscale=1.1)
                     buf.seek(0)
+                    
+                    chart_bytes_for_cache = buf.getvalue()
                     chart_image = Image.open(buf)
                     st.image(chart_image, caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
             except Exception as e:
@@ -77,32 +98,36 @@ with col1:
 
 with col2:
     st.subheader("⚡ Automated Institutional Report")
-    
-    # Gathering pool of keys from secrets
-    api_keys_pool = []
-    if "GEMINI_API_KEY_1" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY_1"])
-    if "GEMINI_API_KEY_2" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY_2"])
-    if "GEMINI_API_KEY_3" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY_3"])
-    if "GEMINI_API_KEY" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY"])
-    if api_key: api_keys_pool.append(api_key) # Append manual sidebar key if entered
+    final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
     
     if st.button("Run Smart Money Analysis", type="primary"):
-        if not api_keys_pool:
-            st.error("❌ No API Keys found. Please add keys to Streamlit Secrets.")
-        elif chart_image is None:
+        if not final_api_key:
+            st.error("❌ Please configure your Gemini API Key.")
+        elif chart_image is None or chart_bytes_for_cache is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
-            success = False
-            # Loop through our keys pool until one works
-            for idx, current_key in enumerate(api_keys_pool):
-                with st.spinner(f"Attempting analysis using Key Slot {idx + 1}..."):
+            with st.spinner(f"Analyzing footprints for {ticker_name}..."):
+                # Call the cached function safely
+                raw_text = get_cached_analysis(
+                    chart_bytes_for_cache, 
+                    ticker_name, 
+                    model_choice, 
+                    INSTITUTIONAL_PROMPT, 
+                    final_api_key
+                )
+                
+                # Check if the function caught a raw API error
+                if raw_text.startswith("ERROR_OCCURRED:"):
+                    error_msg = raw_text.replace("ERROR_OCCURRED:", "").strip()
+                    if "429" in error_msg or "quota" in error_msg.lower():
+                        st.error("❌ Quota Exhausted! You've used up your free daily requests. Please switch models in the sidebar or wait for your daily reset.")
+                    elif "503" in error_msg:
+                        st.error("❌ Google servers are temporarily overloaded. Please try clicking the button again in a few seconds.")
+                    else:
+                        st.error(f"❌ API Error: {error_msg}")
+                else:
                     try:
-                        client = genai.Client(api_key=current_key)
-                        content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
-                        response = client.models.generate_content(model=model_choice, contents=content_payload)
-                        raw_text = response.text
-                        
-                        # Parsing
+                        # Parsing logic
                         verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
                         for line in raw_text.split("\n"):
                             if line.startswith("VERDICT:"): verdict = line.replace("VERDICT:", "").strip()
@@ -111,24 +136,13 @@ with col2:
                         
                         clear_markdown_body = "\n".join([l for l in raw_text.split("\n") if not l.startswith(("VERDICT:", "BULLISH_", "BEARISH_"))]).strip()
                         
+                        # UI Rendering
                         st.success(f"### 🏁 Final Verdict: {verdict}")
                         m_col1, m_col2 = st.columns(2)
                         m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
                         m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
                         st.markdown("---")
                         st.markdown(clear_markdown_body)
-                        
-                        success = True
-                        st.success(f"✅ Analysis Complete (Handled by Key Slot {idx + 1})")
-                        break # Break out of loop since request succeeded
-                        
-                    except Exception as e:
-                        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                            st.warning(f"⚠️ Key Slot {idx + 1} is exhausted. Trying next slot...")
-                            continue # Continue loop to next key index
-                        else:
-                            st.error(f"An unexpected error occurred: {str(e)}")
-                            break
-            
-            if not success:
-                st.error("❌ All available API keys are currently exhausted for today. Please wait or add another backup key.")
+                    except Exception as parse_err:
+                        # Fallback rendering if the formatting didn't split perfectly
+                        st.markdown(raw_text)
