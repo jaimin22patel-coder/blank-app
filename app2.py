@@ -18,7 +18,7 @@ volume_multiplier = st.sidebar.slider("Volume Breakout Multiplier", min_value=1.
 @st.cache_data(ttl=600)
 def fetch_nse_data(symbol):
     try:
-        # Pulling clean history using standard library API connection
+        # Pull data safely via direct web API
         url = f"https://query1.financeapi.com/v8/finance/chart/{symbol}.NS?range=1y&interval=1d"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response:
@@ -37,7 +37,7 @@ def fetch_nse_data(symbol):
         }, index=pd.to_datetime(timestamps, unit='s'))
         
         return df.dropna()
-    except Exception as e:
+    except:
         return pd.DataFrame()
 
 df = fetch_nse_data(ticker)
