@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import urllib.request
 import json
-from datetime import datetime
 
 st.set_page_config(layout="wide")
 st.title("🇮🇳 Institutional Price Action Tool")
@@ -19,7 +18,7 @@ volume_multiplier = st.sidebar.slider("Volume Breakout Multiplier", min_value=1.
 @st.cache_data(ttl=600)
 def fetch_nse_data(symbol):
     try:
-        # Pull clean daily/weekly intervals via open web APIs
+        # Pulling clean history using standard library API connection
         url = f"https://query1.financeapi.com/v8/finance/chart/{symbol}.NS?range=1y&interval=1d"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as response:
@@ -46,7 +45,6 @@ df = fetch_nse_data(ticker)
 if df.empty:
     st.error(f"Could not retrieve market data for '{ticker}'. Please ensure it's a valid NSE stock token.")
 else:
-    # Resample to weekly format if specified by user
     if timeframe == "Weekly":
         df = df.resample('W').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
 
