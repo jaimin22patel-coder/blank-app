@@ -1,36 +1,73 @@
 import streamlit as st
+from google import genai
+from PIL import Image
 import yfinance as yf
 import mplfinance as mpf
 import io
-import pandas as pd
-from smartmoneyconcepts.smc import smc  # Fixed the import namespace path here
+import os
 
 # Set page configuration
 st.set_page_config(
-    page_title="Local Institutional Price Action Analyzer",
+    page_title="Auto-Institutional Price Action Analyzer",
     page_icon="📊",
     layout="wide"
 )
 
 # Application Header
-st.title("📊 Local Institutional Price Action Stock Analyzer")
-st.caption("100% Free - Run calculations locally with zero API Keys or daily query limits.")
+st.title("📊 Auto-Institutional Price Action Stock Analyzer")
+st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute Smart Money analysis.")
 st.markdown("---")
 
-# Layout Split: Left for inputs, Right for analytical outputs
+# Sidebar Configuration
+st.sidebar.header("🔑 Setup & Settings")
+api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
+model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
+
+st.sidebar.markdown("""
+### Indian Market Format:
+Add `.NS` for NSE stocks or `.BO` for BSE stocks.
+* *Example:* `RELIANCE.NS`, `SBIN.NS`.
+""")
+
+# Strictly engineered prompt forcing a standardized Markdown Table layout
+INSTITUTIONAL_PROMPT = """
+You are an Institutional Price Action Analyst specializing in smart money concepts. 
+Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
+
+You must present your core findings strictly using this exact structural layout:
+
+VERDICT: [Insert only one: Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
+BULLISH_SCORE: [Number 0-100]
+BEARISH_SCORE: [Number 0-100]
+
+### 🎯 Institutional Key Levels Board
+Create a clean markdown table matching these exact column headers:
+| Price Level / Range | Zone Type | Institutional Action / Reason (One Sentence) |
+
+Inside the table, make sure to map out:
+1. Fresh Demand / Accumulation Zone
+2. Fresh Supply / Distribution Zone
+3. Buy Trigger / Liquidity Sweep Level
+4. Invalidation Level (Stop Loss)
+5. Major Liquidity Target (Take Profit)
+
+### 🧭 Market Context Notes
+- Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
+"""
+
+# Layout Split: Left for data inputs, Right for AI analysis output
 col1, col2 = st.columns([1, 1.2])
 
 with col1:
     st.subheader("🔍 Fetch Chart Data")
-    ticker_name = st.text_input("Stock Ticker Symbol", placeholder="e.g., ITC.NS").strip().upper()
+    ticker_name = st.text_input("Stock Ticker Symbol", placeholder="e.g., RELIANCE.NS").strip().upper()
     time_period = st.selectbox("Select History Lookback", ["3mo", "6mo", "1y", "2y"], index=1)
     time_interval = st.selectbox("Candle Timeframe", ["1d", "1wk"], index=0)
 
     chart_image = None
-    calculated_metrics = {}
 
     if ticker_name:
-        with st.spinner(f"Fetching data for {ticker_name}..."):
+        with st.spinner(f"Fetching chart for {ticker_name}..."):
             try:
                 stock = yf.Ticker(ticker_name)
                 df = stock.history(period=time_period, interval=time_interval)
@@ -38,47 +75,6 @@ with col1:
                 if df.empty:
                     st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
                 else:
-                    # Prepare data structural renaming for the smc library format requirements
-                    ohlc = df.copy().rename(columns={
-                        'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'
-                    })
-                    
-                    # --- NATIVE SMART MONEY MATHEMATICS ---
-                    # 1. Identify Swing Structures (using fixed length window)
-                    swings = smc.swing_highs_lows(ohlc, swing_length=20)
-                    
-                    # 2. Extract Key Order Blocks (Demand / Supply Zones)
-                    ob_df = smc.ob(ohlc, swings)
-                    
-                    # Find last active institutional footprints safely
-                    bull_obs = ob_df[ob_df['OB'] == 1]
-                    bear_obs = ob_df[ob_df['OB'] == -1]
-                    
-                    demand_zone = f"₹{bull_obs['Bottom'].iloc[-1]:.2f} - ₹{bull_obs['Top'].iloc[-1]:.2f}" if not bull_obs.empty else f"₹{df['Low'].min():.2f}"
-                    supply_zone = f"₹{bear_obs['Bottom'].iloc[-1]:.2f} - ₹{bear_obs['Top'].iloc[-1]:.2f}" if not bear_obs.empty else f"₹{df['High'].max():.2f}"
-                    
-                    # 3. Liquidity Levels and Breakouts
-                    last_close = df['Close'].iloc[-1]
-                    sma_20 = df['Close'].rolling(window=20).mean().iloc[-1]
-                    
-                    # Calculate Bias Scores algorithmically based on current position relative to moving average
-                    bullish_bias = int(((last_close - df['Low'].min()) / (df['High'].max() - df['Low'].min() + 0.001)) * 100)
-                    bearish_bias = 100 - bullish_bias
-                    verdict = "Accumulate / Buy on Retest" if bullish_bias > 55 else "Hold / Wait" if bullish_bias >= 45 else "Reduce / Sell on Breakdown"
-                    
-                    calculated_metrics = {
-                        "verdict": verdict,
-                        "bullish": bullish_bias,
-                        "bearish": bearish_bias,
-                        "demand": demand_zone,
-                        "supply": supply_zone,
-                        "trigger": f"₹{df['Low'].tail(5).min():.2f}",
-                        "invalidation": f"₹{(df['Low'].min() * 0.98):.2f}",
-                        "target": f"₹{(df['High'].max() * 1.05):.2f}",
-                        "is_bullish_trend": last_close > sma_20 if not pd.isna(sma_20) else True
-                    }
-
-                    # --- PLOT LOCAL CHART ---
                     buf = io.BytesIO()
                     custom_style = mpf.make_mpf_style(
                         base_mpf_style='yahoo', 
@@ -90,38 +86,56 @@ with col1:
                         savefig=dict(fname=buf, dpi=150, bbox_inches='tight'), figscale=1.1
                     )
                     buf.seek(0)
-                    st.image(io.BytesIO(buf.read()), caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
-                    
+                    chart_image = Image.open(buf)
+                    st.image(chart_image, caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
             except Exception as e:
-                st.error(f"Failed to compile math parameters: {str(e)}")
+                st.error(f"Failed to fetch market data: {str(e)}")
 
 with col2:
-    st.subheader("⚡ Algorithmic Smart Money Report")
+    st.subheader("⚡ Automated Institutional Report")
+    final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
     
-    if ticker_name and calculated_metrics:
-        # UI Presentation Layer
-        st.success(f"### 🏁 Final Verdict: {calculated_metrics['verdict']}")
-        
-        m_col1, m_col2 = st.columns(2)
-        m_col1.metric("🟢 Algorithmic Bullish Bias", f"{calculated_metrics['bullish']}%")
-        m_col2.metric("🔴 Algorithmic Bearish Bias", f"{calculated_metrics['bearish']}%")
-        st.markdown("---")
-        
-        # Displaying the data using real calculations inside a Markdown Table
-        st.markdown("### 🎯 Institutional Key Levels Board")
-        st.markdown(f"""
-| Price Level / Range | Zone Type | Institutional Action / Reason (One Sentence) |
-| :--- | :--- | :--- |
-| **{calculated_metrics['demand']}** | Fresh Demand / Accumulation Zone | Localized mathematical order block verified by high volume bullish momentum expansion. |
-| **{calculated_metrics['supply']}** | Fresh Supply / Distribution Zone | Resting institutional distribution sell-orders identified via historical asset rejection peaks. |
-| **{calculated_metrics['trigger']}** | Buy Trigger / Liquidity Sweep Level | Recent minor swing low range highlighting high structural risk concentration points. |
-| **{calculated_metrics['invalidation']}** | Invalidation Level (Stop Loss) | Macro support failure threshold indicating complete cancellation of ongoing market structural setup. |
-| **{calculated_metrics['target']}** | Major Liquidity Target (Take Profit) | Unmitigated visual liquidity destination mapping out standard extension price expectations. |
-""")
-        
-        st.markdown("### 🧭 Market Context Notes")
-        trend_status = "trading above" if calculated_metrics['is_bullish_trend'] else "trading below"
-        st.markdown(f"- Asset price is currently **{trend_status}** the baseline 20-period technical simple moving average indicator framework.")
-        st.markdown("- Structural order blocks calculated locally reveal key consolidation barriers where major volumes have actively traded.")
-    else:
-        st.info("Enter a stock ticker on the left panel to execute automatic code-based analysis.")
+    if st.button("Run Smart Money Analysis", type="primary"):
+        if not final_api_key:
+            st.error("❌ Please configure your Gemini API Key.")
+        elif chart_image is None:
+            st.error("❌ No generated stock chart to analyze.")
+        else:
+            with st.spinner(f"Parsing institutional footprints for {ticker_name}..."):
+                try:
+                    client = genai.Client(api_key=final_api_key)
+                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
+                    response = client.models.generate_content(model=model_choice, contents=content_payload)
+                    raw_text = response.text
+                    
+                    # Core variables parsing engine
+                    verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
+                    
+                    lines = raw_text.split("\n")
+                    remaining_lines = []
+                    
+                    for line in lines:
+                        if line.startswith("VERDICT:"): 
+                            verdict = line.replace("VERDICT:", "").strip()
+                        elif line.startswith("BULLISH_SCORE:"): 
+                            bullish = line.replace("BULLISH_SCORE:", "").strip()
+                        elif line.startswith("BEARISH_SCORE:"): 
+                            bearish = line.replace("BEARISH_SCORE:", "").strip()
+                        else:
+                            remaining_lines.append(line)
+                            
+                    clear_markdown_body = "\n".join(remaining_lines).strip()
+                    
+                    # UI Presentation Layer
+                    st.success(f"### 🏁 Final Verdict: {verdict}")
+                    
+                    m_col1, m_col2 = st.columns(2)
+                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
+                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
+                    st.markdown("---")
+                    
+                    # Directly inject the clean, structured levels table and brief notes
+                    st.markdown(clear_markdown_body)
+                        
+                except Exception as e:
+                    st.error(f"An error occurred during processing: {str(e)}")
