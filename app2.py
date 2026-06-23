@@ -109,7 +109,7 @@ with col2:
                     }
                     
                     payload = {
-                        "model": "llama-3.2-11b-vision-preview",
+                        "model": "llama-3.2-90b-vision-preview",
                         "messages": [
                             {
                                 "role": "user",
