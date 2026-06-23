@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 st.title("📊 Auto-Institutional Price Action Stock Analyzer")
-st.caption("Smart Money analysis with automated error-handling and local cache optimization.")
+st.caption("Smart Money analysis with level tables and live error catching.")
 st.markdown("---")
 
 # Sidebar Configuration
@@ -49,18 +49,6 @@ Inside the table, map out Demand/Supply zones, Breakout Triggers, Stop Loss, and
 - Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
 """
 
-# CACHED ENGINE: Saves your API quota so repeated clicks don't break your tool
-@st.cache_data(show_spinner=False)
-def get_cached_analysis(chart_bytes, ticker, model, target_prompt, secret_key):
-    try:
-        img = Image.open(io.BytesIO(chart_bytes))
-        client = genai.Client(api_key=secret_key)
-        content_payload = [img, f"Ticker: {ticker}\n" + target_prompt]
-        response = client.models.generate_content(model=model, contents=content_payload)
-        return response.text
-    except Exception as api_err:
-        return f"ERROR_OCCURRED: {str(api_err)}"
-
 # Layout Split
 col1, col2 = st.columns([1, 1.2])
 
@@ -71,7 +59,6 @@ with col1:
     time_interval = st.selectbox("Candle Timeframe", ["1d", "1wk"], index=0)
 
     chart_image = None
-    chart_bytes_for_cache = None
 
     if ticker_name:
         with st.spinner(f"Fetching chart for {ticker_name}..."):
@@ -90,7 +77,6 @@ with col1:
                     mpf.plot(df, type='candle', style=custom_style, volume=True, savefig=dict(fname=buf, dpi=150, bbox_inches='tight'), figscale=1.1)
                     buf.seek(0)
                     
-                    chart_bytes_for_cache = buf.getvalue()
                     chart_image = Image.open(buf)
                     st.image(chart_image, caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
             except Exception as e:
@@ -103,46 +89,37 @@ with col2:
     if st.button("Run Smart Money Analysis", type="primary"):
         if not final_api_key:
             st.error("❌ Please configure your Gemini API Key.")
-        elif chart_image is None or chart_bytes_for_cache is None:
+        elif chart_image is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
             with st.spinner(f"Analyzing footprints for {ticker_name}..."):
-                # Call the cached function safely
-                raw_text = get_cached_analysis(
-                    chart_bytes_for_cache, 
-                    ticker_name, 
-                    model_choice, 
-                    INSTITUTIONAL_PROMPT, 
-                    final_api_key
-                )
-                
-                # Check if the function caught a raw API error
-                if raw_text.startswith("ERROR_OCCURRED:"):
-                    error_msg = raw_text.replace("ERROR_OCCURRED:", "").strip()
-                    if "429" in error_msg or "quota" in error_msg.lower():
-                        st.error("❌ Quota Exhausted! You've used up your free daily requests. Please switch models in the sidebar or wait for your daily reset.")
-                    elif "503" in error_msg:
-                        st.error("❌ Google servers are temporarily overloaded. Please try clicking the button again in a few seconds.")
+                try:
+                    # Live call directly to the API
+                    client = genai.Client(api_key=final_api_key)
+                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
+                    response = client.models.generate_content(model=model_choice, contents=content_payload)
+                    raw_text = response.text
+                    
+                    # Parsing metrics engine
+                    verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
+                    for line in raw_text.split("\n"):
+                        if line.startswith("VERDICT:"): verdict = line.replace("VERDICT:", "").strip()
+                        if line.startswith("BULLISH_SCORE:"): bullish = line.replace("BULLISH_SCORE:", "").strip()
+                        if line.startswith("BEARISH_SCORE:"): bearish = line.replace("BEARISH_SCORE:", "").strip()
+                    
+                    clear_markdown_body = "\n".join([l for l in raw_text.split("\n") if not l.startswith(("VERDICT:", "BULLISH_", "BEARISH_"))]).strip()
+                    
+                    # UI Layout Rendering
+                    st.success(f"### 🏁 Final Verdict: {verdict}")
+                    m_col1, m_col2 = st.columns(2)
+                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
+                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
+                    st.markdown("---")
+                    st.markdown(clear_markdown_body)
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                        st.error("❌ Quota Exhausted! Your current API Key has hit its limit for today. Try switching to the other model option in the sidebar or insert a fresh key.")
                     else:
-                        st.error(f"❌ API Error: {error_msg}")
-                else:
-                    try:
-                        # Parsing logic
-                        verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
-                        for line in raw_text.split("\n"):
-                            if line.startswith("VERDICT:"): verdict = line.replace("VERDICT:", "").strip()
-                            if line.startswith("BULLISH_SCORE:"): bullish = line.replace("BULLISH_SCORE:", "").strip()
-                            if line.startswith("BEARISH_SCORE:"): bearish = line.replace("BEARISH_SCORE:", "").strip()
-                        
-                        clear_markdown_body = "\n".join([l for l in raw_text.split("\n") if not l.startswith(("VERDICT:", "BULLISH_", "BEARISH_"))]).strip()
-                        
-                        # UI Rendering
-                        st.success(f"### 🏁 Final Verdict: {verdict}")
-                        m_col1, m_col2 = st.columns(2)
-                        m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
-                        m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
-                        st.markdown("---")
-                        st.markdown(clear_markdown_body)
-                    except Exception as parse_err:
-                        # Fallback rendering if the formatting didn't split perfectly
-                        st.markdown(raw_text)
+                        st.error(f"❌ API Processing Error: {error_msg}")
