@@ -23,7 +23,11 @@ st.sidebar.header("🔑 Setup & Settings")
 api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
 
 # Upgraded model list: Prioritizing gemini-2.0-flash for high free daily limits (1500 RPD)
-model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.0-flash", "gemini-2.5-flash"])
+# Hardcode the high-limit free model directly 
+response = client.models.generate_content(
+    model="gemini-2.0-flash", 
+    contents=content_payload
+)
 
 st.sidebar.markdown("""
 ### Indian Market Format:
