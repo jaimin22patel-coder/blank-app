@@ -15,12 +15,12 @@ st.set_page_config(
 )
 
 st.title("📊 Free Auto-Institutional Price Action Stock Analyzer")
-st.caption("Smart Money analysis powered by Free Open-Source Vision AI models (No Quota Limits).")
+st.caption("Smart Money analysis powered by Free Groq Vision AI (No Quota Limits).")
 st.markdown("---")
 
 # Sidebar Configuration
 st.sidebar.header("🔑 Free Setup")
-hf_token = st.sidebar.text_input("Enter Hugging Face Token (If not saved in Secrets)", type="password")
+groq_api_key = st.sidebar.text_input("Enter Groq API Key (If not saved in Secrets)", type="password")
 
 st.sidebar.markdown("""
 ### Indian Market Format:
@@ -29,7 +29,7 @@ Add `.NS` for NSE stocks or `.BO` for BSE stocks.
 """)
 
 # Core Prompt Framework
-INSTITUTIONAL_PROMPT = """You are an Institutional Price Action Analyst. 
+INSTITUTIONAL_PROMPT = """You are an Institutional Price Action Analyst specializing in smart money concepts. 
 Analyze the provided stock chart image. Find the primary horizontal price levels where major institutional orders are resting, trapped, or deploying.
 
 You must present your core findings strictly using this exact structural layout:
@@ -48,7 +48,7 @@ Provide data for: Demand Zone, Supply Zone, Breakout Trigger, Stop Loss, and Tak
 - Provide 2 short, single-sentence bullet points on overall market structure.
 """
 
-# Helper function to convert PIL Image to base64 for open-source model consumption
+# Helper function to convert PIL Image to base64 for vision models
 def encode_image_to_base64(pil_img):
     buffered = io.BytesIO()
     pil_img.save(buffered, format="PNG")
@@ -89,24 +89,27 @@ with col1:
 
 with col2:
     st.subheader("⚡ Automated Institutional Report")
-    final_token = st.secrets.get("HF_TOKEN", hf_token)
+    final_token = st.secrets.get("GROQ_API_KEY", groq_api_key)
     
     if st.button("Run Smart Money Analysis", type="primary"):
         if not final_token:
-            st.error("❌ Please enter your Hugging Face Token in the sidebar or save it as HF_TOKEN in Secrets.")
+            st.error("❌ Please enter your Groq API Key in the sidebar or save it as GROQ_API_KEY in Secrets.")
         elif chart_image is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
-            with st.spinner(f"Analyzing footprints for {ticker_name} via Free Server..."):
+            with st.spinner(f"Analyzing footprints for {ticker_name} via Groq Free Cloud..."):
                 try:
                     base64_image = encode_image_to_base64(chart_image)
                     
-                    # Core Hugging Face Serverless endpoint path
-                    API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-VL-7B-Instruct"
-                    headers = {"Authorization": f"Bearer {final_token}"}
+                    # Groq Cloud API Endpoint
+                    API_URL = "https://api.groq.com/openai/v1/chat/completions"
+                    headers = {
+                        "Authorization": f"Bearer {final_token}",
+                        "Content-Type": "application/json"
+                    }
                     
                     payload = {
-                        "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+                        "model": "llama-3.2-11b-vision-preview",
                         "messages": [
                             {
                                 "role": "user",
@@ -116,7 +119,8 @@ with col2:
                                 ]
                             }
                         ],
-                        "max_tokens": 800
+                        "temperature": 0.2,
+                        "max_tokens": 1024
                     }
                     
                     response = requests.post(API_URL, headers=headers, json=payload)
@@ -125,9 +129,9 @@ with col2:
                     if 'choices' in res_json:
                         raw_text = res_json['choices'][0]['message']['content']
                     elif 'error' in res_json:
-                        raise Exception(res_json['error'])
+                        raise Exception(res_json['error']['message'])
                     else:
-                        raw_text = str(res_json)
+                        raise Exception("Unexpected backend API structure response.")
                     
                     # Parsing metrics engine
                     verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
@@ -147,4 +151,4 @@ with col2:
                     st.markdown(clear_markdown_body)
                     
                 except Exception as e:
-                    st.error(f"Error accessing the free inference servers: {str(e)}")
+                    st.error(f"Error accessing the analysis servers: {str(e)}")
