@@ -2,11 +2,6 @@ streamlit
 yfinance
 pandas
 google-genai
-yfinance
 mplfinance
 pillow
-streamlit
-yfinance
-mplfinance
-pandas
 smartmoneyconcepts
