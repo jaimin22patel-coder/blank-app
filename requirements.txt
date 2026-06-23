@@ -1,4 +1,4 @@
-streamlit
+yfinance
 pandas
-numpy
-https://github.com/rongardF/tvdatafeed/archive/refs/heads/master.zip
+plotly
+pandas-ta
