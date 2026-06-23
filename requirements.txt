@@ -15,3 +15,7 @@ streamlit
 pandas
 numpy
 https://github.com/rongardF/tvdatafeed/archive/refs/heads/master.zip
+pandas
+numpy
+streamlit
+https://github.com/rongardF/tvdatafeed/archive/refs/heads/master.zip
