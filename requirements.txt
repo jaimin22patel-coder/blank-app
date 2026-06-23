@@ -5,3 +5,7 @@ google-genai
 mplfinance
 pillow
 smartmoneyconcepts
+yfinance
+mplfinance
+pillow
+requests
