@@ -8,3 +8,10 @@ smartmoneyconcepts
 requests
 numpy
 git+https://github.com/rongardF/tvdatafeed.git
+pandas
+numpy
+https://github.com/rongardF/tvdatafeed/archive/refs/heads/master.zip
+streamlit
+pandas
+numpy
+https://github.com/rongardF/tvdatafeed/archive/refs/heads/master.zip
