@@ -13,23 +13,16 @@ st.set_page_config(
     layout="wide"
 )
 
-# Application Header
 st.title("📊 Auto-Institutional Price Action Stock Analyzer")
-st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute Smart Money analysis.")
+st.caption("Smart Money analysis with automated multi-key rate limit protection.")
 st.markdown("---")
 
 # Sidebar Configuration
 st.sidebar.header("🔑 Setup & Settings")
-api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
+api_key = st.sidebar.text_input("Manual Backup Key (Optional)", type="password")
 model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
-st.sidebar.markdown("""
-### Indian Market Format:
-Add `.NS` for NSE stocks or `.BO` for BSE stocks.
-* *Example:* `RELIANCE.NS`, `SBIN.NS`.
-""")
-
-# Strictly engineered prompt forcing a standardized Markdown Table layout
+# Core Prompt Framework
 INSTITUTIONAL_PROMPT = """
 You are an Institutional Price Action Analyst specializing in smart money concepts. 
 Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
@@ -44,18 +37,13 @@ BEARISH_SCORE: [Number 0-100]
 Create a clean markdown table matching these exact column headers:
 | Price Level / Range | Zone Type | Institutional Action / Reason (One Sentence) |
 
-Inside the table, make sure to map out:
-1. Fresh Demand / Accumulation Zone
-2. Fresh Supply / Distribution Zone
-3. Buy Trigger / Liquidity Sweep Level
-4. Invalidation Level (Stop Loss)
-5. Major Liquidity Target (Take Profit)
+Inside the table, map out Demand/Supply zones, Breakout Triggers, Stop Loss, and Take Profits.
 
 ### 🧭 Market Context Notes
 - Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
 """
 
-# Layout Split: Left for data inputs, Right for AI analysis output
+# Layout Split
 col1, col2 = st.columns([1, 1.2])
 
 with col1:
@@ -73,18 +61,14 @@ with col1:
                 df = stock.history(period=time_period, interval=time_interval)
                 
                 if df.empty:
-                    st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
+                    st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks.")
                 else:
                     buf = io.BytesIO()
                     custom_style = mpf.make_mpf_style(
                         base_mpf_style='yahoo', 
                         marketcolors=mpf.make_marketcolors(up='green', down='red', inherit=True)
                     )
-                    mpf.plot(
-                        df, type='candle', style=custom_style, volume=True, 
-                        title=f"\n{ticker_name} Clean Structure Chart ({time_interval})",
-                        savefig=dict(fname=buf, dpi=150, bbox_inches='tight'), figscale=1.1
-                    )
+                    mpf.plot(df, type='candle', style=custom_style, volume=True, savefig=dict(fname=buf, dpi=150, bbox_inches='tight'), figscale=1.1)
                     buf.seek(0)
                     chart_image = Image.open(buf)
                     st.image(chart_image, caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
@@ -93,49 +77,58 @@ with col1:
 
 with col2:
     st.subheader("⚡ Automated Institutional Report")
-    final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
+    
+    # Gathering pool of keys from secrets
+    api_keys_pool = []
+    if "GEMINI_API_KEY_1" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY_1"])
+    if "GEMINI_API_KEY_2" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY_2"])
+    if "GEMINI_API_KEY_3" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY_3"])
+    if "GEMINI_API_KEY" in st.secrets: api_keys_pool.append(st.secrets["GEMINI_API_KEY"])
+    if api_key: api_keys_pool.append(api_key) # Append manual sidebar key if entered
     
     if st.button("Run Smart Money Analysis", type="primary"):
-        if not final_api_key:
-            st.error("❌ Please configure your Gemini API Key.")
+        if not api_keys_pool:
+            st.error("❌ No API Keys found. Please add keys to Streamlit Secrets.")
         elif chart_image is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
-            with st.spinner(f"Parsing institutional footprints for {ticker_name}..."):
-                try:
-                    client = genai.Client(api_key=final_api_key)
-                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
-                    response = client.models.generate_content(model=model_choice, contents=content_payload)
-                    raw_text = response.text
-                    
-                    # Core variables parsing engine
-                    verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
-                    
-                    lines = raw_text.split("\n")
-                    remaining_lines = []
-                    
-                    for line in lines:
-                        if line.startswith("VERDICT:"): 
-                            verdict = line.replace("VERDICT:", "").strip()
-                        elif line.startswith("BULLISH_SCORE:"): 
-                            bullish = line.replace("BULLISH_SCORE:", "").strip()
-                        elif line.startswith("BEARISH_SCORE:"): 
-                            bearish = line.replace("BEARISH_SCORE:", "").strip()
-                        else:
-                            remaining_lines.append(line)
-                            
-                    clear_markdown_body = "\n".join(remaining_lines).strip()
-                    
-                    # UI Presentation Layer
-                    st.success(f"### 🏁 Final Verdict: {verdict}")
-                    
-                    m_col1, m_col2 = st.columns(2)
-                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
-                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
-                    st.markdown("---")
-                    
-                    # Directly inject the clean, structured levels table and brief notes
-                    st.markdown(clear_markdown_body)
+            success = False
+            # Loop through our keys pool until one works
+            for idx, current_key in enumerate(api_keys_pool):
+                with st.spinner(f"Attempting analysis using Key Slot {idx + 1}..."):
+                    try:
+                        client = genai.Client(api_key=current_key)
+                        content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
+                        response = client.models.generate_content(model=model_choice, contents=content_payload)
+                        raw_text = response.text
                         
-                except Exception as e:
-                    st.error(f"An error occurred during processing: {str(e)}")
+                        # Parsing
+                        verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
+                        for line in raw_text.split("\n"):
+                            if line.startswith("VERDICT:"): verdict = line.replace("VERDICT:", "").strip()
+                            if line.startswith("BULLISH_SCORE:"): bullish = line.replace("BULLISH_SCORE:", "").strip()
+                            if line.startswith("BEARISH_SCORE:"): bearish = line.replace("BEARISH_SCORE:", "").strip()
+                        
+                        clear_markdown_body = "\n".join([l for l in raw_text.split("\n") if not l.startswith(("VERDICT:", "BULLISH_", "BEARISH_"))]).strip()
+                        
+                        st.success(f"### 🏁 Final Verdict: {verdict}")
+                        m_col1, m_col2 = st.columns(2)
+                        m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
+                        m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
+                        st.markdown("---")
+                        st.markdown(clear_markdown_body)
+                        
+                        success = True
+                        st.success(f"✅ Analysis Complete (Handled by Key Slot {idx + 1})")
+                        break # Break out of loop since request succeeded
+                        
+                    except Exception as e:
+                        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                            st.warning(f"⚠️ Key Slot {idx + 1} is exhausted. Trying next slot...")
+                            continue # Continue loop to next key index
+                        else:
+                            st.error(f"An unexpected error occurred: {str(e)}")
+                            break
+            
+            if not success:
+                st.error("❌ All available API keys are currently exhausted for today. Please wait or add another backup key.")
