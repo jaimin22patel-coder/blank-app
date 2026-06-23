@@ -22,12 +22,8 @@ st.markdown("---")
 st.sidebar.header("🔑 Setup & Settings")
 api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
 
-# Upgraded model list: Prioritizing gemini-2.0-flash for high free daily limits (1500 RPD)
-# Hardcode the high-limit free model directly 
-response = client.models.generate_content(
-    model="gemini-2.0-flash", 
-    contents=content_payload
-)
+# Display active tier information for clarity
+st.sidebar.info("🤖 **Engine Active:** Gemini 2.0 Flash Tier (Configured for up to 1,500 free requests daily)")
 
 st.sidebar.markdown("""
 ### Indian Market Format:
@@ -83,7 +79,7 @@ with col1:
                     st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
                 else:
                     # --- MATH ENGINES (PROMPT GROUNDING) ---
-                    # Gather cold numerical data natively for free to avoid AI vision hallucination 
+                    # Calculate structural benchmarks locally to keep performance sharp and accurate
                     last_close = df['Close'].iloc[-1]
                     high_period = df['High'].max()
                     low_period = df['Low'].min()
@@ -93,7 +89,7 @@ with col1:
                     Recent Close Price: {last_close:.2f}
                     Period Structural High: {high_period:.2f}
                     Period Structural Low: {low_period:.2f}
-                    20-Period Simple Moving Average: {sma_20:.2f} if available else N/A
+                    20-Period Simple Moving Average: {sma_20:.2f}
                     """
                     
                     # --- CHART RENDERING ENGINE ---
@@ -127,12 +123,13 @@ with col2:
                 try:
                     client = genai.Client(api_key=final_api_key)
                     
-                    # Merge structured system text instructions with mathematical hard facts
+                    # Merge instruction prompt with direct market math values
                     full_prompt = f"{INSTITUTIONAL_PROMPT}\n\n[CRITICAL MATHEMATICAL DATA FOR VERIFICATION]:\n{market_data_summary}"
                     content_payload = [chart_image, f"Ticker: {ticker_name}\n" + full_prompt]
                     
+                    # Explicitly target the high-threshold free tier model
                     response = client.models.generate_content(
-                        model=model_choice, 
+                        model="gemini-2.0-flash", 
                         contents=content_payload
                     )
                     raw_text = response.text
@@ -163,12 +160,11 @@ with col2:
                     m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
                     st.markdown("---")
                     
-                    # Directly inject the clean, structured levels table and brief notes
+                    # Render table and market structure notes 
                     st.markdown(clear_markdown_body)
                         
                 except Exception as e:
-                    # Added clear descriptive handling for quota issues
                     if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                        st.error("❌ Free Tier Limit Reached. Please switch the selected model option to 'gemini-2.0-flash' in the sidebar or check back later.")
+                        st.error("❌ The standard API free limits are fully occupied right now. Please try your request again shortly or switch projects in Google AI Studio.")
                     else:
                         st.error(f"An error occurred during processing: {str(e)}")
