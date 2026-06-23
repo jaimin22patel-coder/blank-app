@@ -1,10 +1,11 @@
 import streamlit as st
-from google import genai
 from PIL import Image
 import yfinance as yf
 import mplfinance as mpf
 import io
 import os
+import requests
+import base64
 
 # Set page configuration
 st.set_page_config(
@@ -13,14 +14,13 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📊 Auto-Institutional Price Action Stock Analyzer")
-st.caption("Smart Money analysis with level tables and live error catching.")
+st.title("📊 Free Auto-Institutional Price Action Stock Analyzer")
+st.caption("Smart Money analysis powered by Free Open-Source Vision AI models (No Quota Limits).")
 st.markdown("---")
 
 # Sidebar Configuration
-st.sidebar.header("🔑 Setup & Settings")
-api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
-model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
+st.sidebar.header("🔑 Free Setup")
+hf_token = st.sidebar.text_input("Enter Hugging Face Token (If not saved in Secrets)", type="password")
 
 st.sidebar.markdown("""
 ### Indian Market Format:
@@ -29,25 +29,30 @@ Add `.NS` for NSE stocks or `.BO` for BSE stocks.
 """)
 
 # Core Prompt Framework
-INSTITUTIONAL_PROMPT = """
-You are an Institutional Price Action Analyst specializing in smart money concepts. 
-Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
+INSTITUTIONAL_PROMPT = """You are an Institutional Price Action Analyst. 
+Analyze the provided stock chart image. Find the primary horizontal price levels where major institutional orders are resting, trapped, or deploying.
 
 You must present your core findings strictly using this exact structural layout:
 
-VERDICT: [Insert only one: Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
+VERDICT: [Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
 BULLISH_SCORE: [Number 0-100]
 BEARISH_SCORE: [Number 0-100]
 
 ### 🎯 Institutional Key Levels Board
-Create a clean markdown table matching these exact column headers:
 | Price Level / Range | Zone Type | Institutional Action / Reason (One Sentence) |
+| --- | --- | --- |
 
-Inside the table, map out Demand/Supply zones, Breakout Triggers, Stop Loss, and Take Profits.
+Provide data for: Demand Zone, Supply Zone, Breakout Trigger, Stop Loss, and Take Profit.
 
 ### 🧭 Market Context Notes
-- Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
+- Provide 2 short, single-sentence bullet points on overall market structure.
 """
+
+# Helper function to convert PIL Image to base64 for open-source model consumption
+def encode_image_to_base64(pil_img):
+    buffered = io.BytesIO()
+    pil_img.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 # Layout Split
 col1, col2 = st.columns([1, 1.2])
@@ -84,42 +89,57 @@ with col1:
 
 with col2:
     st.subheader("⚡ Automated Institutional Report")
-    final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
+    final_token = st.secrets.get("HF_TOKEN", hf_token)
     
     if st.button("Run Smart Money Analysis", type="primary"):
-        if not final_api_key:
-            st.error("❌ Please configure your Gemini API Key.")
+        if not final_token:
+            st.error("❌ Please enter your Hugging Face Token in the sidebar or save it as HF_TOKEN in Secrets.")
         elif chart_image is None:
             st.error("❌ No generated stock chart to analyze.")
         else:
-            with st.spinner(f"Analyzing footprints for {ticker_name}..."):
+            with st.spinner(f"Analyzing footprints for {ticker_name} via Free Server..."):
                 try:
-                    # Live call directly to the API
-                    client = genai.Client(api_key=final_api_key)
-                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
-                    response = client.models.generate_content(model=model_choice, contents=content_payload)
-                    raw_text = response.text
+                    base64_image = encode_image_to_base64(chart_image)
+                    
+                    # Using the free Hugging Face Serverless API architecture
+                    API_URL = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-VL-7B-Instruct"
+                    headers = {"Authorization": f"Bearer {final_token}"}
+                    
+                    payload = {
+                        "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": INSTITUTIONAL_PROMPT},
+                                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                                ]
+                            }
+                        ],
+                        "max_tokens": 800
+                    }
+                    
+                    response = requests.post(API_URL, headers=headers, json=payload)
+                    res_json = response.json()
+                    
+                    raw_text = res_json['choices'][0]['message']['content']
                     
                     # Parsing metrics engine
                     verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
                     for line in raw_text.split("\n"):
-                        if line.startswith("VERDICT:"): verdict = line.replace("VERDICT:", "").strip()
-                        if line.startswith("BULLISH_SCORE:"): bullish = line.replace("BULLISH_SCORE:", "").strip()
-                        if line.startswith("BEARISH_SCORE:"): bearish = line.replace("BEARISH_SCORE:", "").strip()
+                        if line.upper().startswith("VERDICT:"): verdict = line.split(":", 1)[1].strip()
+                        if line.upper().startswith("BULLISH_SCORE:"): bullish = ''.join(c for c in line if c.isdigit())
+                        if line.upper().startswith("BEARISH_SCORE:"): bearish = ''.join(c for c in line if c.isdigit())
                     
-                    clear_markdown_body = "\n".join([l for l in raw_text.split("\n") if not l.startswith(("VERDICT:", "BULLISH_", "BEARISH_"))]).strip()
+                    clear_markdown_body = "\n".join([l for l in raw_text.split("\n") if not l.upper().startswith(("VERDICT:", "BULLISH_", "BEARISH_"))]).strip()
                     
                     # UI Layout Rendering
                     st.success(f"### 🏁 Final Verdict: {verdict}")
                     m_col1, m_col2 = st.columns(2)
-                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
-                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
+                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%" if bullish else "N/A")
+                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%" if bearish else "N/A")
                     st.markdown("---")
                     st.markdown(clear_markdown_body)
                     
                 except Exception as e:
-                    error_msg = str(e)
-                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                        st.error("❌ Quota Exhausted! Your current API Key has hit its limit for today. Try switching to the other model option in the sidebar or insert a fresh key.")
-                    else:
-                        st.error(f"❌ API Processing Error: {error_msg}")
+                    st.error(f"Error accessing the free inference servers: {str(e)}")
