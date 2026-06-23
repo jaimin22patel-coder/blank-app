@@ -3,8 +3,7 @@ import yfinance as yf
 import mplfinance as mpf
 import io
 import pandas as pd
-# Import the open-source mathematical Smart Money logic engine
-import smartmoneyconcepts as smc 
+from smartmoneyconcepts.smc import smc  # Fixed the import namespace path here
 
 # Set page configuration
 st.set_page_config(
@@ -45,25 +44,25 @@ with col1:
                     })
                     
                     # --- NATIVE SMART MONEY MATHEMATICS ---
-                    # 1. Identify Swing Structures
+                    # 1. Identify Swing Structures (using fixed length window)
                     swings = smc.swing_highs_lows(ohlc, swing_length=20)
                     
                     # 2. Extract Key Order Blocks (Demand / Supply Zones)
                     ob_df = smc.ob(ohlc, swings)
                     
-                    # Find last active institutional footprints
+                    # Find last active institutional footprints safely
                     bull_obs = ob_df[ob_df['OB'] == 1]
                     bear_obs = ob_df[ob_df['OB'] == -1]
                     
-                    demand_zone = f"₹{bull_obs['Bottom'].iloc[-1]:.2f} - ₹{bull_obs['Top'].iloc[-1]:.2f}" if not bull_obs.empty else "No Fresh Demand Formed"
-                    supply_zone = f"₹{bear_obs['Bottom'].iloc[-1]:.2f} - ₹{bear_obs['Top'].iloc[-1]:.2f}" if not bear_obs.empty else "No Fresh Supply Formed"
+                    demand_zone = f"₹{bull_obs['Bottom'].iloc[-1]:.2f} - ₹{bull_obs['Top'].iloc[-1]:.2f}" if not bull_obs.empty else f"₹{df['Low'].min():.2f}"
+                    supply_zone = f"₹{bear_obs['Bottom'].iloc[-1]:.2f} - ₹{bear_obs['Top'].iloc[-1]:.2f}" if not bear_obs.empty else f"₹{df['High'].max():.2f}"
                     
                     # 3. Liquidity Levels and Breakouts
                     last_close = df['Close'].iloc[-1]
                     sma_20 = df['Close'].rolling(window=20).mean().iloc[-1]
                     
                     # Calculate Bias Scores algorithmically based on current position relative to moving average
-                    bullish_bias = int(((last_close - df['Low'].min()) / (df['High'].max() - df['Low'].min())) * 100)
+                    bullish_bias = int(((last_close - df['Low'].min()) / (df['High'].max() - df['Low'].min() + 0.001)) * 100)
                     bearish_bias = 100 - bullish_bias
                     verdict = "Accumulate / Buy on Retest" if bullish_bias > 55 else "Hold / Wait" if bullish_bias >= 45 else "Reduce / Sell on Breakdown"
                     
@@ -76,7 +75,7 @@ with col1:
                         "trigger": f"₹{df['Low'].tail(5).min():.2f}",
                         "invalidation": f"₹{(df['Low'].min() * 0.98):.2f}",
                         "target": f"₹{(df['High'].max() * 1.05):.2f}",
-                        "is_bullish_trend": last_close > sma_20
+                        "is_bullish_trend": last_close > sma_20 if not pd.isna(sma_20) else True
                     }
 
                     # --- PLOT LOCAL CHART ---
