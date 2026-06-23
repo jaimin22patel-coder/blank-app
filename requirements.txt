@@ -5,7 +5,6 @@ google-genai
 mplfinance
 pillow
 smartmoneyconcepts
-yfinance
-mplfinance
-pillow
 requests
+numpy
+git+https://github.com/rongardF/tvdatafeed.git
