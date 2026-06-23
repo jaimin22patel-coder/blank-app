@@ -1,161 +1,141 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-from tvDatafeed import TvDatafeed, Interval
+from google import genai
+from PIL import Image
+import yfinance as yf
+import mplfinance as mpf
+import io
+import os
 
-# Initialize TradingView Datafeed
-@st.cache_resource
-def init_tv():
-    # Anonymous login; replace with username/password if you have a premium TV account
-    return TvDatafeed()
-
-tv = init_tv()
-
-# --- 1. UI INPUT & CONFIGURATION ---
-st.title("🇮🇳 Indian Stock Price Action Analysis Tool")
-st.sidebar.header("Control Panel")
-
-# Timeframe Dropdown
-tf_choice = st.sidebar.selectbox(
-    "Select Timeframe",
-    options=["1m", "5m", "15m", "1H", "4H", "1D"],
-    index=3 # Default to 1H
+# Set page configuration
+st.set_page_config(
+    page_title="Auto-Institutional Price Action Analyzer",
+    page_icon="📊",
+    layout="wide"
 )
 
-# Map UI selection to TradingView intervals
-tf_map = {
-    "1m": Interval.in_1minute,
-    "5m": Interval.in_5minute,
-    "15m": Interval.in_15minute,
-    "1H": Interval.in_1hour,
-    "4H": Interval.in_4hour,
-    "1D": Interval.in_daily
-}
+# Application Header
+st.title("📊 Auto-Institutional Price Action Stock Analyzer")
+st.caption("Enter any global or Indian ticker to automatically generate a clean chart and execute Smart Money analysis.")
+st.markdown("---")
 
-# Lookback Period Dropdown (Translated to number of candles to fetch)
-lookback_choice = st.sidebar.selectbox(
-    "Select Lookback Period",
-    options=["50 Candles", "100 Candles", "250 Candles", "500 Candles"],
-    index=2 # Default to 250
-)
-n_candles = int(lookback_choice.split()[0])
+# Sidebar Configuration
+st.sidebar.header("🔑 Setup & Settings")
+api_key = st.sidebar.text_input("Enter Gemini API Key (If not saved in Secrets)", type="password")
+model_choice = st.sidebar.selectbox("Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"])
 
-# Stock Symbol Input
-symbol = st.sidebar.text_input("Enter NSE Stock Symbol (e.g., RELIANCE, SBIN)", value="RELIANCE").upper()
+st.sidebar.markdown("""
+### Indian Market Format:
+Add `.NS` for NSE stocks or `.BO` for BSE stocks.
+* *Example:* `RELIANCE.NS`, `SBIN.NS`.
+""")
 
-# --- DATA FETCHING ---
-@st.cache_data(ttl=60) # Cache for 1 minute to prevent constant API spamming
-def load_data(sym, tf, length):
-    try:
-        df = tv.get_hist(symbol=sym, exchange='NSE', interval=tf_map[tf], n_bars=length)
-        if df is not None and not df.empty:
-            df = df.reset_index()
-            # Ensure standard column names
-            df.columns = [c.lower() for c in df.columns]
-            return df
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-    return None
+# Strictly engineered prompt forcing a standardized Markdown Table layout
+INSTITUTIONAL_PROMPT = """
+You are an Institutional Price Action Analyst specializing in smart money concepts. 
+Analyze the provided chart and extract the primary key horizontal price levels where major institutional orders are resting, trapped, or deploying.
 
-df = load_data(symbol, tf_choice, n_candles)
+You must present your core findings strictly using this exact structural layout:
 
-if df is not None:
-    cmp = df['close'].iloc[-1]
-    st.metric(label=f"Current Market Price (CMP) - NSE:{symbol}", value=f"₹{cmp:.2f}")
+VERDICT: [Insert only one: Strong Buy / Buy on Retest / Accumulate / Hold / Wait / Reduce Position / Sell on Breakdown / Strong Sell]
+BULLISH_SCORE: [Number 0-100]
+BEARISH_SCORE: [Number 0-100]
 
-    # --- 2. LOGIC: SWING HIGHS & LOWS (Market Structure) ---
-    window = 5
-    df['is_high'] = (df['high'] == df['high'].rolling(window=window*2+1, center=True).max())
-    df['is_low'] = (df['low'] == df['low'].rolling(window=window*2+1, center=True).min())
+### 🎯 Institutional Key Levels Board
+Create a clean markdown table matching these exact column headers:
+| Price Level / Range | Zone Type | Institutional Action / Reason (One Sentence) |
 
-    # --- 3. LOGIC: SUPPORT & RESISTANCE (Rule d: Chart-Based Proximity) ---
-    swing_highs = df[df['is_high']]['high'].tolist()
-    swing_lows = df[df['is_low']]['low'].tolist()
+Inside the table, make sure to map out:
+1. Fresh Demand / Accumulation Zone
+2. Fresh Supply / Distribution Zone
+3. Buy Trigger / Liquidity Sweep Level
+4. Invalidation Level (Stop Loss)
+5. Major Liquidity Target (Take Profit)
+
+### 🧭 Market Context Notes
+- Provide 2-3 short, single-sentence bullet points on overall market structure and orderflow context here.
+"""
+
+# Layout Split: Left for data inputs, Right for AI analysis output
+col1, col2 = st.columns([1, 1.2])
+
+with col1:
+    st.subheader("🔍 Fetch Chart Data")
+    ticker_name = st.text_input("Stock Ticker Symbol", placeholder="e.g., RELIANCE.NS").strip().upper()
+    time_period = st.selectbox("Select History Lookback", ["3mo", "6mo", "1y", "2y"], index=1)
+    time_interval = st.selectbox("Candle Timeframe", ["1d", "1wk"], index=0)
+
+    chart_image = None
+
+    if ticker_name:
+        with st.spinner(f"Fetching chart for {ticker_name}..."):
+            try:
+                stock = yf.Ticker(ticker_name)
+                df = stock.history(period=time_period, interval=time_interval)
+                
+                if df.empty:
+                    st.error("⚠️ No data found. Make sure to append `.NS` for NSE stocks (e.g. `SBIN.NS`)")
+                else:
+                    buf = io.BytesIO()
+                    custom_style = mpf.make_mpf_style(
+                        base_mpf_style='yahoo', 
+                        marketcolors=mpf.make_marketcolors(up='green', down='red', inherit=True)
+                    )
+                    mpf.plot(
+                        df, type='candle', style=custom_style, volume=True, 
+                        title=f"\n{ticker_name} Clean Structure Chart ({time_interval})",
+                        savefig=dict(fname=buf, dpi=150, bbox_inches='tight'), figscale=1.1
+                    )
+                    buf.seek(0)
+                    chart_image = Image.open(buf)
+                    st.image(chart_image, caption=f"System Generated Chart for {ticker_name}", use_container_width=True)
+            except Exception as e:
+                st.error(f"Failed to fetch market data: {str(e)}")
+
+with col2:
+    st.subheader("⚡ Automated Institutional Report")
+    final_api_key = st.secrets.get("GEMINI_API_KEY", api_key)
     
-    # Chart-based boundary: Find the immediate closest structural points above and below CMP
-    upper_bounds = [h for h in swing_highs if h > cmp]
-    lower_bounds = [l for l in swing_lows if l < cmp]
-    
-    nearest_resistance_ceiling = min(upper_bounds) if upper_bounds else df['high'].max()
-    nearest_support_floor = max(lower_bounds) if lower_bounds else df['low'].min()
-
-    # Filter all historical levels to strictly fit within our chart room boundaries (Rule D)
-    valid_resistances = [h for h in swing_highs if cmp < h <= nearest_resistance_ceiling]
-    valid_supports = [l for l in swing_lows if nearest_support_floor <= l < cmp]
-
-    # --- 4. LOGIC: CANDLESTICK PATTERNS ---
-    # Helper to calculate candle dimensions
-    body = (df['close'] - df['open']).abs()
-    candle_range = df['high'] - df['low']
-    upper_wick = df['high'] - df[['open', 'close']].max(axis=1)
-    lower_wick = df[['open', 'close']].min(axis=1) - df['low']
-    
-    # Identify Hammer & Shooting Star
-    df['hammer'] = (lower_wick > (2 * body)) & (upper_wick < (0.2 * candle_range)) & (body > 0)
-    df['shooting_star'] = (upper_wick > (2 * body)) & (lower_wick < (0.2 * candle_range)) & (body > 0)
-    
-    # Identify Engulfing Patterns
-    df['bullish_engulfing'] = (df['close'].shift(1) < df['open'].shift(1)) & \
-                              (df['close'] > df['open']) & \
-                              (df['close'] >= df['open'].shift(1)) & \
-                              (df['open'] <= df['close'].shift(1))
-                              
-    df['bearish_engulfing'] = (df['close'].shift(1) > df['open'].shift(1)) & \
-                              (df['close'] < df['open']) & \
-                              (df['close'] <= df['open'].shift(1)) & \
-                              (df['open'] >= df['close'].shift(1))
-
-    # --- 5. LOGIC: BREAKOUT / BREAKDOWN WITH VOLUME ---
-    vol_ma = df['volume'].rolling(window=20).mean()
-    df['high_vol'] = df['volume'] > (1.5 * vol_ma) # 1.5x average volume
-    
-    # Check last few bars for breakout/breakdown
-    latest_bar = df.iloc[-1]
-    prev_bar = df.iloc[-2]
-    
-    breakout_triggered = prev_bar['close'] > nearest_resistance_ceiling and prev_bar['high_vol']
-    breakdown_triggered = prev_bar['close'] < nearest_support_floor and prev_bar['high_vol']
-
-    # --- DISPLAY ANALYTICS RESULTS ---
-    
-    st.subheader("1. Market Structure & Trend")
-    # Quick simple trend logic based on last 2 structural points
-    last_highs = df[df['is_high']]['high'].tail(2).tolist()
-    if len(last_highs) == 2:
-        if last_highs[1] > last_highs[0]:
-            st.success("Structure: Bullish (Making Higher Highs)")
+    if st.button("Run Smart Money Analysis", type="primary"):
+        if not final_api_key:
+            st.error("❌ Please configure your Gemini API Key.")
+        elif chart_image is None:
+            st.error("❌ No generated stock chart to analyze.")
         else:
-            st.color_picker("Structure: Bearish (Making Lower Highs)", "#FF4B4B")
-    else:
-        st.info("Structure: Consolidating / Insufficient structural pivots.")
-
-    st.subheader("2. Chart-Based Proximity Levels")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(label="Nearest Support Floor", value=f"₹{nearest_support_floor:.2f}")
-    with col2:
-        st.metric(label="Nearest Resistance Ceiling", value=f"₹{nearest_resistance_ceiling:.2f}")
-
-    st.subheader("3. Breakout & Volume Scan")
-    if breakout_triggered:
-        st.success(f"⚠️ BULLISH BREAKOUT CONFIRMED: Price broke above ₹{nearest_resistance_ceiling:.2f} with High Volume. Watch for a Retest.")
-    elif breakdown_triggered:
-        st.error(f"⚠️ BEARISH BREAKDOWN CONFIRMED: Price cracked below ₹{nearest_support_floor:.2f} with High Volume. Watch for a Retest.")
-    else:
-        st.write("No active structural breakouts matching volume parameters right now.")
-
-    st.subheader("4. Price Action Rejection / Hold Scan (Current Candles)")
-    patterns_found = []
-    if latest_bar['hammer']: patterns_found.append("🔨 Hammer Found (Potential Institutional Support Hold)")
-    if latest_bar['bullish_engulfing']: patterns_found.append("📈 Bullish Engulfing Pattern")
-    if latest_bar['shooting_star']: patterns_found.append("💫 Shooting Star Found (Potential Institutional Rejection)")
-    if latest_bar['bearish_engulfing']: patterns_found.append("📉 Bearish Engulfing Pattern")
-    
-    if patterns_found:
-        for p in patterns_found:
-            st.info(p)
-    else:
-        st.write("No institutional rejection patterns printing on the immediate candle.")
-
-else:
-    st.warning("Please enter a valid NSE stock ticker and ensure you have internet connectivity to load TradingView charts.")
+            with st.spinner(f"Parsing institutional footprints for {ticker_name}..."):
+                try:
+                    client = genai.Client(api_key=final_api_key)
+                    content_payload = [chart_image, f"Ticker: {ticker_name}\n" + INSTITUTIONAL_PROMPT]
+                    response = client.models.generate_content(model=model_choice, contents=content_payload)
+                    raw_text = response.text
+                    
+                    # Core variables parsing engine
+                    verdict, bullish, bearish, clear_markdown_body = "N/A", "0", "0", ""
+                    
+                    lines = raw_text.split("\n")
+                    remaining_lines = []
+                    
+                    for line in lines:
+                        if line.startswith("VERDICT:"): 
+                            verdict = line.replace("VERDICT:", "").strip()
+                        elif line.startswith("BULLISH_SCORE:"): 
+                            bullish = line.replace("BULLISH_SCORE:", "").strip()
+                        elif line.startswith("BEARISH_SCORE:"): 
+                            bearish = line.replace("BEARISH_SCORE:", "").strip()
+                        else:
+                            remaining_lines.append(line)
+                            
+                    clear_markdown_body = "\n".join(remaining_lines).strip()
+                    
+                    # UI Presentation Layer
+                    st.success(f"### 🏁 Final Verdict: {verdict}")
+                    
+                    m_col1, m_col2 = st.columns(2)
+                    m_col1.metric("🟢 Bullish Smart Money Bias", f"{bullish}%")
+                    m_col2.metric("🔴 Bearish Smart Money Bias", f"{bearish}%")
+                    st.markdown("---")
+                    
+                    # Directly inject the clean, structured levels table and brief notes
+                    st.markdown(clear_markdown_body)
+                        
+                except Exception as e:
+                    st.error(f"An error occurred during processing: {str(e)}")
