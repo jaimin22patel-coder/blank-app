@@ -1,9 +1,1 @@
-yfinance
-pandas
-plotly
-pandas-ta
-streamlit
-yfinance
-plotly
-streamlit
-plotly
+
